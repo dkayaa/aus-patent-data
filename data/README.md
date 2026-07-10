@@ -32,10 +32,22 @@ Scrapers use `application_number` (and related IDs) to pull semantic text from t
 - Prefer regenerating enriched and labeled files from `scrape/` + `classification/` over hand-editing.
 - Update this README when schema or row counts change.
 
+## Interim (scrape outputs)
+
+| Path | Producer | Role |
+|------|----------|------|
+| `interim/patent_search/{application_number}.json` | `scrape/src/patent_search.py` | Raw Patent Search API responses (gitignored; regenerable) |
+
 ## Schema (enriched / final)
 
 TBD once API fields and labels are fixed.
 
 ## Regeneration
 
-TBD — point to `scripts/` and stage READMEs once implemented.
+```bash
+export IP_AUSTRALIA_CLIENT_ID='...'
+export IP_AUSTRALIA_CLIENT_SECRET='...'
+python scripts/fetch_patent_search.py
+```
+
+See `scrape/README.md` for config and idempotency notes.

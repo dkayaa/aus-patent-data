@@ -8,7 +8,7 @@ Does **not** define the application universe. That comes from the IP Rapid / dat
 
 1. Read application identifiers from a base file under `data/raw/` (e.g. `application_number`).
 2. Call the IP Australia API (and related endpoints as needed) to fetch abstracts, descriptions, claims, or other semantic text.
-3. Write raw API responses or normalized text tables into `data/raw/` and/or `data/interim/` (paths decided per fetcher; document them here when added).
+3. Write raw API responses into `data/interim/` (one JSON file per application for the patent search fetcher).
 
 ## Rules
 
@@ -22,11 +22,63 @@ Does **not** define the application universe. That comes from the IP Rapid / dat
 - `src/` — API clients and fetch utilities
 - `config/` — endpoints, credentials env keys, rate limits, path settings
 
+## APIs
+
+### Australian Patent Search API
+
+| | |
+|---|---|
+| Portal | [Australian Patent Search API](https://portal.api.ipaustralia.gov.au/s/communityapi/a082w00000TJfb7AAD/developersaustralianpatentsearchapi) |
+| Production base | `https://production.api.ipaustralia.gov.au/public/australian-patent-search-api/v1` |
+| Endpoint used | `GET /patent/{ipRightIdentifier}` |
+| Auth | OAuth2 `client_credentials` → JWT via [External Token API](https://production.api.ipaustralia.gov.au/public/external-token-api/v1/access_token) |
+| Config | `config/patent_search.yaml` |
+| Module | `src/patent_search.py` |
+
+The sibling [Design Search API](https://portal.api.ipaustralia.gov.au/s/communityapi/a082w000000LObRAAW/developersaustraliandesignsearchapi) uses the same portal pattern (`GET /design/{id}`) but is not used here — the toy seed is patents only.
+
 ## Inputs / outputs
 
-- **Reads:** `data/raw/` base dumps (start with `application-toy.csv`)
-- **Writes:** enriched semantic payloads / tables under `data/raw/` or `data/interim/` (TBD per scraper)
+| | Path |
+|---|---|
+| **Reads** | `data/raw/application-toy.csv` (`application_number`) |
+| **Writes** | `data/interim/patent_search/{application_number}.json` |
+
+Each output file wraps the API JSON:
+
+```json
+{
+  "application_number": "2022901535",
+  "fetched_at": "2026-07-10T01:00:00Z",
+  "response": { }
+}
+```
+
+**Idempotency:** if `{application_number}.json` already exists, that row is skipped. Re-runs do not refetch or duplicate.
+
+## Config knobs (`config/patent_search.yaml`)
+
+| Key | Meaning |
+|---|---|
+| `auth.token_url` | External Token API URL |
+| `auth.client_id_env` / `auth.client_secret_env` | Env vars for OAuth client credentials |
+| `fetch.max_responses` | Optional cap on **new** fetches this run (`null` = no cap) |
+| `fetch.backoff.*` | Exponential backoff on 429/5xx/network errors |
+| `fetch.min_interval_seconds` | Delay between successful requests |
+| `paths.*` | Input CSV, column name, output directory |
+
+On each run with pending work, the script POSTs `client_id` / `client_secret` to the token URL, then uses the returned `access_token` as `Authorization: Bearer …`.
 
 ## How to run
 
-TBD once scrapers exist.
+```bash
+pip install -r requirements.txt
+export IP_AUSTRALIA_CLIENT_ID='...'
+export IP_AUSTRALIA_CLIENT_SECRET='...'   # or copy .env.example → .env and load it
+
+# Full toy set (skips any already-written interim files)
+python scripts/fetch_patent_search.py
+
+# Cap new fetches for a smoke test
+python scripts/fetch_patent_search.py --max-responses 5 -v
+```

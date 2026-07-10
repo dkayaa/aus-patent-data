@@ -1,0 +1,33 @@
+# Australian Patent Search API enrichment
+# Docs: https://portal.api.ipaustralia.gov.au/s/communityapi/a082w00000TJfb7AAD/developersaustralianpatentsearchapi
+# Note: the Design Search portal page is a sibling API; toy seed rows are patents.
+
+api:
+  base_url: https://production.api.ipaustralia.gov.au/public/australian-patent-search-api/v1
+  # GET {base_url}/patent/{application_number}
+  patent_path_template: /patent/{ip_right_identifier}
+
+auth:
+  # OAuth2 client_credentials → Bearer JWT
+  token_url: https://production.api.ipaustralia.gov.au/public/external-token-api/v1/access_token
+  # Set the env vars named here; do not commit secrets.
+  client_id_env: IP_AUSTRALIA_CLIENT_ID
+  client_secret_env: IP_AUSTRALIA_CLIENT_SECRET
+
+paths:
+  input_csv: data/raw/application-toy.csv
+  application_number_column: application_number
+  # One JSON file per application_number (idempotent skip if present)
+  output_dir: data/interim/patent_search
+
+fetch:
+  # Optional cap on new successful fetches this run (null = no cap)
+  max_responses: null
+  request_timeout_seconds: 60
+  # Polite delay between successful requests
+  min_interval_seconds: 0.25
+  backoff:
+    initial_seconds: 1.0
+    max_seconds: 60.0
+    multiplier: 2.0
+    max_retries: 5
