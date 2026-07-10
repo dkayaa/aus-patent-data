@@ -19,7 +19,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 import yaml
@@ -50,8 +50,33 @@ class FetchConfig:
     output_dir: Path
     max_responses: int | None
     request_timeout_seconds: float
-    min_interval_seconds: float
+    max_requests_per_minute: int
+    rate_limit_headroom: float
     backoff: BackoffConfig
+
+    @property
+    def min_interval_seconds(self) -> float:
+        """Minimum spacing between API calls from the per-minute cap."""
+        effective = max(1, int(self.max_requests_per_minute * self.rate_limit_headroom))
+        return 60.0 / effective
+
+
+class RateLimiter:
+    """Space requests so we stay under max_requests_per_minute."""
+
+    def __init__(self, min_interval_seconds: float) -> None:
+        self.min_interval_seconds = min_interval_seconds
+        self._last_request_at = 0.0
+
+    def wait(self) -> None:
+        if self.min_interval_seconds <= 0:
+            return
+        now = time.monotonic()
+        elapsed = now - self._last_request_at
+        remaining = self.min_interval_seconds - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
+        self._last_request_at = time.monotonic()
 
 
 def _repo_path(path: str | Path) -> Path:
@@ -61,6 +86,47 @@ def _repo_path(path: str | Path) -> Path:
 
 def _env(name: str) -> str:
     return os.environ.get(name, "").strip()
+
+
+def redact_token(token: str) -> str:
+    """Log-safe token preview: first 3 chars + ... + last 3 chars."""
+    if len(token) <= 6:
+        return "..."
+    return f"{token[:3]}...{token[-3:]}"
+
+
+def _host(url: str) -> str:
+    return urlparse(url).netloc or url
+
+
+def log_preflight(cfg: FetchConfig) -> None:
+    """Log hosts and credential presence without printing secrets."""
+    token_host = _host(cfg.token_url)
+    api_host = _host(cfg.base_url)
+    same_env = token_host == api_host
+    logger.info(
+        "preflight token_host=%s api_host=%s same_host=%s "
+        "client_id_set=%s client_id_len=%s client_secret_set=%s client_secret_len=%s "
+        "max_requests_per_minute=%s headroom=%s min_interval_seconds=%.3f "
+        "token_url=%s base_url=%s",
+        token_host,
+        api_host,
+        same_env,
+        bool(cfg.client_id),
+        len(cfg.client_id),
+        bool(cfg.client_secret),
+        len(cfg.client_secret),
+        cfg.max_requests_per_minute,
+        cfg.rate_limit_headroom,
+        cfg.min_interval_seconds,
+        cfg.token_url,
+        cfg.base_url,
+    )
+    if not same_env:
+        logger.warning(
+            "token host and API host differ; use matching test/prod credentials "
+            "for the token URL"
+        )
 
 
 def load_config(
@@ -91,6 +157,12 @@ def load_config(
     if max_responses is not None:
         max_responses = int(max_responses)
 
+    # Steady-state pacing from published per-minute cap.
+    max_rpm = int(fetch.get("max_requests_per_minute", 600))
+    headroom = float(fetch.get("rate_limit_headroom", 0.9))
+    if not 0.0 < headroom <= 1.0:
+        raise SystemExit("fetch.rate_limit_headroom must be in (0, 1]")
+
     return FetchConfig(
         base_url=raw["api"]["base_url"].rstrip("/"),
         patent_path_template=raw["api"]["patent_path_template"],
@@ -102,7 +174,8 @@ def load_config(
         output_dir=_repo_path(raw["paths"]["output_dir"]),
         max_responses=max_responses,
         request_timeout_seconds=float(fetch["request_timeout_seconds"]),
-        min_interval_seconds=float(fetch["min_interval_seconds"]),
+        max_requests_per_minute=max_rpm,
+        rate_limit_headroom=headroom,
         backoff=BackoffConfig(
             initial_seconds=float(backoff["initial_seconds"]),
             max_seconds=float(backoff["max_seconds"]),
@@ -127,7 +200,6 @@ def fetch_access_token(cfg: FetchConfig) -> str:
         headers={
             "Content-Type": "application/x-www-form-urlencoded",
             "Accept": "application/json",
-            "User-Agent": "aus-patent-data/0.1 (research)",
         },
         method="POST",
     )
@@ -151,9 +223,10 @@ def fetch_access_token(cfg: FetchConfig) -> str:
     token_type = payload.get("token_type", "Bearer")
     expires_in = payload.get("expires_in")
     logger.info(
-        "obtained access token (type=%s expires_in=%s)",
+        "obtained access token (type=%s expires_in=%s token=%s)",
         token_type,
         expires_in,
+        redact_token(token),
     )
     return token
 
@@ -193,7 +266,7 @@ def patent_url(cfg: FetchConfig, application_number: str) -> str:
     path = cfg.patent_path_template.format(ip_right_identifier=application_number)
     if not path.startswith("/"):
         path = "/" + path
-    return f"{cfg.base_url}{path}"
+    return f"{cfg.base_url.rstrip('/')}{path}"
 
 
 def _should_retry(status: int | None, exc: BaseException | None) -> bool:
@@ -208,18 +281,20 @@ def fetch_patent(
     cfg: FetchConfig,
     application_number: str,
     access_token: str,
+    rate_limiter: RateLimiter,
 ) -> dict[str, Any]:
     url = patent_url(cfg, application_number)
     delay = cfg.backoff.initial_seconds
     last_error: BaseException | None = None
 
     for attempt in range(cfg.backoff.max_retries + 1):
+        rate_limiter.wait()
+        logger.info("GET %s (token=%s)", url, redact_token(access_token))
         req = Request(
             url,
             headers={
                 "Authorization": f"Bearer {access_token}",
                 "Accept": "application/json",
-                "User-Agent": "aus-patent-data/0.1 (research)",
             },
             method="GET",
         )
@@ -244,9 +319,10 @@ def fetch_patent(
             if attempt >= cfg.backoff.max_retries or not _should_retry(status, exc):
                 raise
             logger.warning(
-                "HTTP %s for %s (attempt %s/%s); backing off %.1fs",
+                "HTTP %s for %s url=%s (attempt %s/%s); backing off %.1fs",
                 status,
                 application_number,
+                url,
                 attempt + 1,
                 cfg.backoff.max_retries + 1,
                 delay,
@@ -256,8 +332,9 @@ def fetch_patent(
             if attempt >= cfg.backoff.max_retries or not _should_retry(None, exc):
                 raise
             logger.warning(
-                "Error fetching %s (attempt %s/%s): %s; backing off %.1fs",
+                "Error fetching %s url=%s (attempt %s/%s): %s; backing off %.1fs",
                 application_number,
+                url,
                 attempt + 1,
                 cfg.backoff.max_retries + 1,
                 exc,
@@ -293,6 +370,7 @@ def write_response(
 
 
 def run(cfg: FetchConfig) -> int:
+    log_preflight(cfg)
     numbers = read_application_numbers(cfg.input_csv, cfg.application_number_column)
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -314,33 +392,35 @@ def run(cfg: FetchConfig) -> int:
         return 0
 
     access_token = fetch_access_token(cfg)
+    rate_limiter = RateLimiter(cfg.min_interval_seconds)
 
     fetched = 0
     failures = 0
-    for i, application_number in enumerate(pending):
+    for application_number in pending:
         # Re-check in case of concurrent runs / partial prior write.
         if already_fetched(cfg.output_dir, application_number):
             logger.info("skip existing %s", application_number)
             continue
+        url = patent_url(cfg, application_number)
         try:
-            payload = fetch_patent(cfg, application_number, access_token)
+            payload = fetch_patent(
+                cfg, application_number, access_token, rate_limiter
+            )
             path = write_response(cfg.output_dir, application_number, payload)
             fetched += 1
-            logger.info("wrote %s", path.relative_to(REPO_ROOT))
+            logger.info("wrote %s (url=%s)", path.relative_to(REPO_ROOT), url)
         except HTTPError as exc:
             failures += 1
             logger.error(
-                "failed %s: HTTP %s %s",
+                "failed %s url=%s: HTTP %s %s",
                 application_number,
+                url,
                 exc.code,
                 exc.reason,
             )
         except Exception as exc:  # noqa: BLE001 — keep run going on per-row errors
             failures += 1
-            logger.error("failed %s: %s", application_number, exc)
-
-        if i < len(pending) - 1 and cfg.min_interval_seconds > 0:
-            time.sleep(cfg.min_interval_seconds)
+            logger.error("failed %s url=%s: %s", application_number, url, exc)
 
     logger.info("done fetched=%s failures=%s skipped_existing=%s", fetched, failures, skipped)
     return 1 if failures else 0

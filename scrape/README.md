@@ -31,7 +31,7 @@ Does **not** define the application universe. That comes from the IP Rapid / dat
 | Portal | [Australian Patent Search API](https://portal.api.ipaustralia.gov.au/s/communityapi/a082w00000TJfb7AAD/developersaustralianpatentsearchapi) |
 | Production base | `https://production.api.ipaustralia.gov.au/public/australian-patent-search-api/v1` |
 | Endpoint used | `GET /patent/{ipRightIdentifier}` |
-| Auth | OAuth2 `client_credentials` → JWT via [External Token API](https://production.api.ipaustralia.gov.au/public/external-token-api/v1/access_token) |
+| Auth | OAuth2 `client_credentials` → JWT via [External Token API](https://production.api.ipaustralia.gov.au/public/external-token-api/v1/access_token); send as `Authorization: Bearer …` |
 | Config | `config/patent_search.yaml` |
 | Module | `src/patent_search.py` |
 
@@ -63,11 +63,12 @@ Each output file wraps the API JSON:
 | `auth.token_url` | External Token API URL |
 | `auth.client_id_env` / `auth.client_secret_env` | Env vars for OAuth client credentials |
 | `fetch.max_responses` | Optional cap on **new** fetches this run (`null` = no cap) |
-| `fetch.backoff.*` | Exponential backoff on 429/5xx/network errors |
-| `fetch.min_interval_seconds` | Delay between successful requests |
+| `fetch.max_requests_per_minute` | Published API cap (default `600`) |
+| `fetch.rate_limit_headroom` | Fraction of that cap to use (default `0.9` → ~540/min, ~0.111s spacing) |
+| `fetch.backoff.*` | Exponential backoff on 429/5xx/network errors only |
 | `paths.*` | Input CSV, column name, output directory |
 
-On each run with pending work, the script POSTs `client_id` / `client_secret` to the token URL, then uses the returned `access_token` as `Authorization: Bearer …`.
+On each run with pending work, the script POSTs `client_id` / `client_secret` to the token URL, then uses the returned `access_token` as `Authorization: Bearer …`. Requests are paced under `max_requests_per_minute`; retries use separate exponential backoff.
 
 ## How to run
 

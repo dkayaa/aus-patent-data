@@ -3,7 +3,7 @@
 # Note: the Design Search portal page is a sibling API; toy seed rows are patents.
 
 api:
-  base_url: https://production.api.ipaustralia.gov.au/public/australian-patent-search-api/v1
+  base_url: https://production.api.ipaustralia.gov.au/public/australian-patent-search-api/v1/
   # GET {base_url}/patent/{application_number}
   patent_path_template: /patent/{ip_right_identifier}
 
@@ -24,8 +24,11 @@ fetch:
   # Optional cap on new successful fetches this run (null = no cap)
   max_responses: null
   request_timeout_seconds: 60
-  # Polite delay between successful requests
-  min_interval_seconds: 0.25
+  # Steady-state pacing (portal limit: 600 requests / minute)
+  max_requests_per_minute: 600
+  # Extra headroom under the published limit (0.0–1.0). 0.9 => ~540/min.
+  rate_limit_headroom: 0.9
+  # Exponential backoff only on retryable errors (429/5xx/network)
   backoff:
     initial_seconds: 1.0
     max_seconds: 60.0
