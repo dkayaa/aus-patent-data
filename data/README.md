@@ -36,7 +36,7 @@ Scrapers use `application_number` (and related IDs) to pull semantic text from t
 
 | Path | Producer | Role |
 |------|----------|------|
-| `interim/patent_search/{application_number}.json` | `scrape/src/patent_search.py` | Raw Patent Search API responses (gitignored; regenerable) |
+| Configured by `scrape/config/patent_search.yaml` → `paths.output_dir` (default external: `/Volumes/T7/patent-aus/data/interim/patent_search/`) | `scrape/src/patent_search.py` | Raw Patent Search API responses |
 
 ## Schema (enriched / final)
 

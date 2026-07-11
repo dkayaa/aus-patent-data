@@ -15,18 +15,19 @@ auth:
   client_secret_env: IP_AUSTRALIA_CLIENT_SECRET
 
 paths:
-  input_csv: data/raw/application-toy.csv
+  input_csv: data/raw/application-from-2000.csv
   application_number_column: application_number
-  # One JSON file per application_number (idempotent skip if present)
-  output_dir: data/interim/patent_search
+  # Absolute or repo-relative. Created if missing (parents=True).
+  # One JSON file per application_number (idempotent skip if present).
+  output_dir: /Volumes/T7/patent-aus/data/interim/patent_search
 
 fetch:
   # Optional cap on new successful fetches this run (null = no cap)
   max_responses: null
   request_timeout_seconds: 60
-  # Steady-state pacing (portal limit: 600 requests / minute)
-  max_requests_per_minute: 600
-  # Extra headroom under the published limit (0.0–1.0). 0.9 => ~540/min.
+  # Steady-state pacing (cap: 500 requests / minute)
+  max_requests_per_minute: 500
+  # Extra headroom under the cap (0.0–1.0). 0.9 => ~450/min.
   rate_limit_headroom: 0.9
   # Exponential backoff only on retryable errors (429/5xx/network)
   backoff:

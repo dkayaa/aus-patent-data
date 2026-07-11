@@ -42,7 +42,7 @@ The sibling [Design Search API](https://portal.api.ipaustralia.gov.au/s/communit
 | | Path |
 |---|---|
 | **Reads** | `data/raw/application-toy.csv` (`application_number`) |
-| **Writes** | `data/interim/patent_search/{application_number}.json` |
+| **Writes** | `paths.output_dir` in config (currently `/Volumes/T7/patent-aus/data/interim/patent_search/{application_number}.json`) |
 
 Each output file wraps the API JSON:
 
@@ -63,10 +63,11 @@ Each output file wraps the API JSON:
 | `auth.token_url` | External Token API URL |
 | `auth.client_id_env` / `auth.client_secret_env` | Env vars for OAuth client credentials |
 | `fetch.max_responses` | Optional cap on **new** fetches this run (`null` = no cap) |
-| `fetch.max_requests_per_minute` | Published API cap (default `600`) |
-| `fetch.rate_limit_headroom` | Fraction of that cap to use (default `0.9` → ~540/min, ~0.111s spacing) |
+| `fetch.max_requests_per_minute` | Request cap (default `500`) |
+| `fetch.rate_limit_headroom` | Fraction of that cap to use (default `0.9` → ~450/min, ~0.133s spacing) |
 | `fetch.backoff.*` | Exponential backoff on 429/5xx/network errors only |
-| `paths.*` | Input CSV, column name, output directory |
+| `paths.output_dir` | Where JSON responses are written (absolute or repo-relative; created if missing) |
+| `paths.input_csv` / `application_number_column` | Seed CSV and ID column |
 
 On each run with pending work, the script POSTs `client_id` / `client_secret` to the token URL, then uses the returned `access_token` as `Authorization: Bearer …`. Requests are paced under `max_requests_per_minute`; retries use separate exponential backoff.
 

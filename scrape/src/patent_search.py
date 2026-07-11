@@ -84,6 +84,14 @@ def _repo_path(path: str | Path) -> Path:
     return p if p.is_absolute() else REPO_ROOT / p
 
 
+def _display_path(path: Path) -> str:
+    """Prefer repo-relative path in logs; fall back to absolute."""
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
 def _env(name: str) -> str:
     return os.environ.get(name, "").strip()
 
@@ -158,7 +166,7 @@ def load_config(
         max_responses = int(max_responses)
 
     # Steady-state pacing from published per-minute cap.
-    max_rpm = int(fetch.get("max_requests_per_minute", 600))
+    max_rpm = int(fetch.get("max_requests_per_minute", 500))
     headroom = float(fetch.get("rate_limit_headroom", 0.9))
     if not 0.0 < headroom <= 1.0:
         raise SystemExit("fetch.rate_limit_headroom must be in (0, 1]")
@@ -408,7 +416,7 @@ def run(cfg: FetchConfig) -> int:
             )
             path = write_response(cfg.output_dir, application_number, payload)
             fetched += 1
-            logger.info("wrote %s (url=%s)", path.relative_to(REPO_ROOT), url)
+            logger.info("wrote %s (url=%s)", _display_path(path), url)
         except HTTPError as exc:
             failures += 1
             logger.error(
