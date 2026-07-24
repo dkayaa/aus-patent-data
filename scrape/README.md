@@ -8,7 +8,7 @@ Does **not** define the application universe. That comes from the IP Rapid / dat
 
 1. Read application identifiers from a base file under `data/raw/` (e.g. `application_number`).
 2. Call the IP Australia API (and related endpoints as needed) to fetch abstracts, descriptions, claims, or other semantic text.
-3. Write raw API responses into `data/interim/` (one JSON file per application for the patent search fetcher).
+3. Write raw API responses into `data/interim/` as batched `part-*.jsonl.gz` shards.
 
 ## Rules
 
@@ -41,20 +41,18 @@ The sibling [Design Search API](https://portal.api.ipaustralia.gov.au/s/communit
 
 | | Path |
 |---|---|
-| **Reads** | `data/raw/application-toy.csv` (`application_number`) |
-| **Writes** | `paths.output_dir` in config (currently `/Volumes/T7/patent-aus/data/interim/patent_search/{application_number}.json`) |
+| **Reads** | `paths.input_csv` in config (e.g. `data/raw/application-from-2000.csv`) (`application_number`) |
+| **Writes** | `paths.output_dir` — `part-NNNNN.jsonl.gz` shards, open `part-NNNNN.jsonl` while a shard is filling, and `fetched_ids.txt` |
 
-Each output file wraps the API JSON:
+Each JSONL line wraps the API JSON (compact, one object per line):
 
 ```json
-{
-  "application_number": "2022901535",
-  "fetched_at": "2026-07-10T01:00:00Z",
-  "response": { }
-}
+{"application_number":"2022901535","fetched_at":"2026-07-10T01:00:00Z","response":{}}
 ```
 
-**Idempotency:** if `{application_number}.json` already exists, that row is skipped. Re-runs do not refetch or duplicate.
+**Idempotency / resume:** application numbers listed in `fetched_ids.txt` are skipped. On startup, any open `part-*.jsonl` is also scanned so a crash between line write and id append does not cause refetch. Re-runs do not duplicate completed IDs.
+
+**Legacy per-file JSON:** if you still have `{application_number}.json` files, pack them once with `python scripts/pack_patent_search_json_to_jsonl.py --input-dir …` (see `scripts/README.md`).
 
 ## Config knobs (`config/patent_search.yaml`)
 
@@ -62,11 +60,12 @@ Each output file wraps the API JSON:
 |---|---|
 | `auth.token_url` | External Token API URL |
 | `auth.client_id_env` / `auth.client_secret_env` | Env vars for OAuth client credentials |
+| `fetch.shard_size` | Records per finalized `part-*.jsonl.gz` (default `1000`) |
 | `fetch.max_responses` | Optional cap on **new** fetches this run (`null` = no cap) |
 | `fetch.max_requests_per_minute` | Request cap (default `500`) |
 | `fetch.rate_limit_headroom` | Fraction of that cap to use (default `0.9` → ~450/min, ~0.133s spacing) |
 | `fetch.backoff.*` | Exponential backoff on 429/5xx/network errors only |
-| `paths.output_dir` | Where JSON responses are written (absolute or repo-relative; created if missing) |
+| `paths.output_dir` | Where shards are written (absolute or repo-relative; created if missing) |
 | `paths.input_csv` / `application_number_column` | Seed CSV and ID column |
 
 On each run with pending work, the script POSTs `client_id` / `client_secret` to the token URL, then uses the returned `access_token` as `Authorization: Bearer …`. Requests are paced under `max_requests_per_minute`; retries use separate exponential backoff.
@@ -78,7 +77,7 @@ pip install -r requirements.txt
 export IP_AUSTRALIA_CLIENT_ID='...'
 export IP_AUSTRALIA_CLIENT_SECRET='...'   # or copy .env.example → .env and load it
 
-# Full toy set (skips any already-written interim files)
+# Full seed set (skips IDs already in fetched_ids.txt)
 python scripts/fetch_patent_search.py
 
 # Cap new fetches for a smoke test
@@ -93,10 +92,10 @@ Post-process raw Patent Search caches into a flatter analysis-ready interim set 
 |---|---|
 | Config | `config/clean_patent_search.yaml` |
 | Module | `src/clean_patent_search.py` |
-| **Reads** | `paths.input_dir` (default `data/interim/patent_search/`) |
-| **Writes** | `paths.output_dir` (default `data/interim/patent_search_clean/{application_number}.json`) plus `summary.json` |
+| **Reads** | `paths.input_dir` (default `data/interim/patent_search/part-*.jsonl.gz`) |
+| **Writes** | Mirrored `paths.output_dir/part-*.jsonl.gz` plus `summary.json` |
 
-Each cleaned file keeps status/title/IPC/parties/dates plus `publishedDocuments[]` with `abstract` and parsed `claims` (`claims_parse_ok` flags OCR/split failures). Outputs are always rewritten (deterministic, cheap). The run also writes `summary.json` in the output dir with counts and the full `claims_parse_failures` list.
+Each cleaned line keeps status/title/IPC/parties/dates plus `publishedDocuments[]` with `abstract` and parsed `claims` (`claims_parse_ok` flags OCR/split failures). Outputs are always rewritten (deterministic, cheap). The run also writes `summary.json` in the output dir with counts and the full `claims_parse_failures` list.
 
 ```bash
 python scripts/clean_patent_search.py

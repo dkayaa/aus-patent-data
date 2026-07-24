@@ -1,39 +1,21 @@
 #!/usr/bin/env python3
-"""Summarize patent_search interim JSON payloads in a folder."""
+"""Summarize patent_search interim JSONL.GZ payloads in a folder."""
 
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "scrape" / "src"))
+
+from jsonl_gz import iter_shard_records  # noqa: E402
+
 DEFAULT_DIR = REPO_ROOT / "data" / "interim" / "patent_search"
 
 
-def _iter_patent_json_paths(input_dir: Path) -> list[Path]:
-    # Skip macOS AppleDouble sidecars (._*.json) common on external volumes.
-    return sorted(
-        p for p in input_dir.glob("*.json") if not p.name.startswith("._")
-    )
-
-
-def _load_json(path: Path) -> dict | None:
-    try:
-        with path.open(encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        print(f"warn: skip {path.name}: {exc}", file=sys.stderr)
-        return None
-    if not isinstance(data, dict):
-        print(f"warn: skip {path.name}: root is not an object", file=sys.stderr)
-        return None
-    return data
-
-
 def summarize(input_dir: Path) -> dict[str, float | int]:
-    paths = _iter_patent_json_paths(input_dir)
     n_patents = 0
     n_with_published = 0
     n_with_ipcr = 0
@@ -41,10 +23,7 @@ def summarize(input_dir: Path) -> dict[str, float | int]:
     claims_lengths: list[int] = []
     abstract_lengths: list[int] = []
 
-    for path in paths:
-        data = _load_json(path)
-        if data is None:
-            continue
+    for data in iter_shard_records(input_dir, include_open_jsonl=True):
         n_patents += 1
         response = data.get("response")
         if not isinstance(response, dict):
@@ -123,13 +102,13 @@ def _print_table(stats: dict[str, float | int], input_dir: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Summarize patent_search interim JSON payloads."
+        description="Summarize patent_search interim JSONL.GZ payloads."
     )
     parser.add_argument(
         "--input-dir",
         type=Path,
         default=DEFAULT_DIR,
-        help=f"Folder of *.json patent payloads (default: {DEFAULT_DIR})",
+        help=f"Folder of part-*.jsonl.gz shards (default: {DEFAULT_DIR})",
     )
     args = parser.parse_args(argv)
     input_dir = args.input_dir.expanduser().resolve()

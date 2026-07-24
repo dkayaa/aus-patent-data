@@ -1,9 +1,9 @@
 """Fetch patent records from the Australian Patent Search API.
 
 Reads application numbers from a base CSV, GETs
-``{base_url}/patent/{application_number}``, and writes one JSON file per
-application under ``data/interim/``. Existing output files are skipped so
-re-runs are idempotent.
+``{base_url}/patent/{application_number}``, and writes compact JSONL shards
+(``part-NNNNN.jsonl.gz``) under the configured output dir. Resume uses
+``fetched_ids.txt`` (plus recovery from any open ``.jsonl`` shard).
 """
 
 from __future__ import annotations
@@ -23,6 +23,13 @@ from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 import yaml
+
+from jsonl_gz import (
+    ShardWriter,
+    append_fetched_id,
+    load_fetched_ids,
+    recover_ids_from_open_shards,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +55,7 @@ class FetchConfig:
     input_csv: Path
     application_number_column: str
     output_dir: Path
+    shard_size: int
     max_responses: int | None
     request_timeout_seconds: float
     max_requests_per_minute: int
@@ -170,6 +178,9 @@ def load_config(
     headroom = float(fetch.get("rate_limit_headroom", 0.9))
     if not 0.0 < headroom <= 1.0:
         raise SystemExit("fetch.rate_limit_headroom must be in (0, 1]")
+    shard_size = int(fetch.get("shard_size", 1000))
+    if shard_size < 1:
+        raise SystemExit("fetch.shard_size must be >= 1")
 
     return FetchConfig(
         base_url=raw["api"]["base_url"].rstrip("/"),
@@ -180,6 +191,7 @@ def load_config(
         input_csv=_repo_path(raw["paths"]["input_csv"]),
         application_number_column=raw["paths"]["application_number_column"],
         output_dir=_repo_path(raw["paths"]["output_dir"]),
+        shard_size=shard_size,
         max_responses=max_responses,
         request_timeout_seconds=float(fetch["request_timeout_seconds"]),
         max_requests_per_minute=max_rpm,
@@ -258,16 +270,6 @@ def read_application_numbers(csv_path: Path, column: str) -> list[str]:
             seen.add(value)
             ordered.append(value)
     return ordered
-
-
-def output_path_for(output_dir: Path, application_number: str) -> Path:
-    # Application numbers are numeric; keep filename safe anyway.
-    safe = "".join(c for c in application_number if c.isalnum() or c in "-_")
-    return output_dir / f"{safe}.json"
-
-
-def already_fetched(output_dir: Path, application_number: str) -> bool:
-    return output_path_for(output_dir, application_number).is_file()
 
 
 def patent_url(cfg: FetchConfig, application_number: str) -> str:
@@ -356,25 +358,12 @@ def fetch_patent(
     raise last_error
 
 
-def write_response(
-    output_dir: Path,
-    application_number: str,
-    payload: dict[str, Any],
-) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_path_for(output_dir, application_number)
-    # Write via temp file then rename for crash-safe idempotency.
-    tmp = path.with_suffix(".json.tmp")
-    record = {
+def make_record(application_number: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return {
         "application_number": application_number,
         "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "response": payload,
     }
-    with tmp.open("w", encoding="utf-8") as f:
-        json.dump(record, f, ensure_ascii=False, indent=2)
-        f.write("\n")
-    tmp.replace(path)
-    return path
 
 
 def run(cfg: FetchConfig) -> int:
@@ -382,16 +371,20 @@ def run(cfg: FetchConfig) -> int:
     numbers = read_application_numbers(cfg.input_csv, cfg.application_number_column)
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
 
-    pending = [n for n in numbers if not already_fetched(cfg.output_dir, n)]
+    fetched_ids = recover_ids_from_open_shards(
+        cfg.output_dir, load_fetched_ids(cfg.output_dir)
+    )
+    pending = [n for n in numbers if n not in fetched_ids]
     skipped = len(numbers) - len(pending)
     if cfg.max_responses is not None:
         pending = pending[: cfg.max_responses]
 
     logger.info(
-        "applications=%s skipped_existing=%s to_fetch=%s output=%s",
+        "applications=%s skipped_existing=%s to_fetch=%s shard_size=%s output=%s",
         len(numbers),
         skipped,
         len(pending),
+        cfg.shard_size,
         cfg.output_dir,
     )
 
@@ -404,33 +397,45 @@ def run(cfg: FetchConfig) -> int:
 
     fetched = 0
     failures = 0
-    for application_number in pending:
-        # Re-check in case of concurrent runs / partial prior write.
-        if already_fetched(cfg.output_dir, application_number):
-            logger.info("skip existing %s", application_number)
-            continue
-        url = patent_url(cfg, application_number)
-        try:
-            payload = fetch_patent(
-                cfg, application_number, access_token, rate_limiter
-            )
-            path = write_response(cfg.output_dir, application_number, payload)
-            fetched += 1
-            logger.info("wrote %s (url=%s)", _display_path(path), url)
-        except HTTPError as exc:
-            failures += 1
-            logger.error(
-                "failed %s url=%s: HTTP %s %s",
-                application_number,
-                url,
-                exc.code,
-                exc.reason,
-            )
-        except Exception as exc:  # noqa: BLE001 — keep run going on per-row errors
-            failures += 1
-            logger.error("failed %s url=%s: %s", application_number, url, exc)
+    with ShardWriter(cfg.output_dir, cfg.shard_size) as writer:
+        for application_number in pending:
+            if application_number in fetched_ids:
+                logger.info("skip existing %s", application_number)
+                continue
+            url = patent_url(cfg, application_number)
+            try:
+                payload = fetch_patent(
+                    cfg, application_number, access_token, rate_limiter
+                )
+                path = writer.write(make_record(application_number, payload))
+                append_fetched_id(cfg.output_dir, application_number)
+                fetched_ids.add(application_number)
+                fetched += 1
+                logger.info(
+                    "wrote %s shard=%s (url=%s)",
+                    application_number,
+                    _display_path(path),
+                    url,
+                )
+            except HTTPError as exc:
+                failures += 1
+                logger.error(
+                    "failed %s url=%s: HTTP %s %s",
+                    application_number,
+                    url,
+                    exc.code,
+                    exc.reason,
+                )
+            except Exception as exc:  # noqa: BLE001 — keep run going on per-row errors
+                failures += 1
+                logger.error("failed %s url=%s: %s", application_number, url, exc)
 
-    logger.info("done fetched=%s failures=%s skipped_existing=%s", fetched, failures, skipped)
+    logger.info(
+        "done fetched=%s failures=%s skipped_existing=%s",
+        fetched,
+        failures,
+        skipped,
+    )
     return 1 if failures else 0
 
 

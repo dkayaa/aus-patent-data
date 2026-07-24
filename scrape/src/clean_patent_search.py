@@ -1,8 +1,8 @@
-"""Reshape Patent Search interim JSON into a flatter cleaned interim set.
+"""Reshape Patent Search interim JSONL shards into a flatter cleaned set.
 
-Reads ``data/interim/patent_search/{application_number}.json`` (raw API wraps),
-parses ``claimsText`` into claim lists, and writes
-``data/interim/patent_search_clean/{application_number}.json`` plus a
+Reads ``part-*.jsonl.gz`` from ``data/interim/patent_search/``, parses
+``claimsText`` into claim lists, and writes mirrored
+``part-*.jsonl.gz`` under ``data/interim/patent_search_clean/`` plus a
 ``summary.json`` manifest (counts and parse failures).
 """
 
@@ -19,6 +19,14 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+from jsonl_gz import (
+    iter_jsonl_gz_shards,
+    iter_records,
+    parse_shard_index,
+    shard_jsonl_gz_path,
+    write_jsonl_gz_records,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,15 +76,6 @@ def load_config(path: Path) -> CleanConfig:
     return CleanConfig(
         input_dir=_repo_path(paths["input_dir"]),
         output_dir=_repo_path(paths["output_dir"]),
-    )
-
-
-def iter_patent_json_paths(input_dir: Path) -> list[Path]:
-    # Skip macOS AppleDouble sidecars and cleaner summary manifests.
-    return sorted(
-        p
-        for p in input_dir.glob("*.json")
-        if not p.name.startswith("._") and p.name != SUMMARY_FILENAME
     )
 
 
@@ -235,31 +234,45 @@ def clean_record(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def write_cleaned(output_dir: Path, application_number: str, record: dict[str, Any]) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    safe = "".join(c for c in application_number if c.isalnum() or c in "-_")
-    if not safe:
-        raise ValueError("application_number is empty or unsafe for filename")
-    path = output_dir / f"{safe}.json"
-    tmp = path.with_suffix(".json.tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        json.dump(record, f, ensure_ascii=False, indent=2)
-        f.write("\n")
-    tmp.replace(path)
-    return path
+def _tally_claims_stats(
+    raw: dict[str, Any],
+    record: dict[str, Any],
+    application_number: str,
+    *,
+    docs_with_claims_text: int,
+    docs_parse_ok: int,
+    docs_parse_fail: int,
+    claims_parse_failures: list[dict[str, str]],
+) -> tuple[int, int, int]:
+    response = raw.get("response") if isinstance(raw.get("response"), dict) else {}
+    raw_docs = response.get("publishedDocuments") or []
+    if not isinstance(raw_docs, list):
+        return docs_with_claims_text, docs_parse_ok, docs_parse_fail
 
-
-def load_raw_json(path: Path) -> dict[str, Any] | None:
-    try:
-        with path.open(encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        logger.warning("skip %s: %s", path.name, exc)
-        return None
-    if not isinstance(data, dict):
-        logger.warning("skip %s: root is not an object", path.name)
-        return None
-    return data
+    for raw_doc, cleaned_doc in zip(raw_docs, record["publishedDocuments"]):
+        if not isinstance(raw_doc, dict):
+            continue
+        claims_text = raw_doc.get("claimsText") or ""
+        if not isinstance(claims_text, str) or not claims_text.strip():
+            continue
+        docs_with_claims_text += 1
+        if cleaned_doc.get("claims_parse_ok"):
+            docs_parse_ok += 1
+        else:
+            docs_parse_fail += 1
+            failure = {
+                "application_number": application_number,
+                "documentTypeCode": str(raw_doc.get("documentTypeCode") or ""),
+                "fileName": str(raw_doc.get("fileName") or ""),
+            }
+            claims_parse_failures.append(failure)
+            logger.info(
+                "claims_parse_ok=false %s:%s fileName=%s",
+                failure["application_number"],
+                failure["documentTypeCode"] or "?",
+                failure["fileName"],
+            )
+    return docs_with_claims_text, docs_parse_ok, docs_parse_fail
 
 
 def run(cfg: CleanConfig) -> int:
@@ -267,82 +280,84 @@ def run(cfg: CleanConfig) -> int:
         logger.error("input_dir does not exist: %s", cfg.input_dir)
         return 1
 
-    paths = iter_patent_json_paths(cfg.input_dir)
-    if cfg.limit is not None:
-        paths = paths[: cfg.limit]
-
+    shard_paths = iter_jsonl_gz_shards(cfg.input_dir)
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
 
     written = 0
     skipped = 0
+    records_in = 0
     docs_with_claims_text = 0
     docs_parse_ok = 0
     docs_parse_fail = 0
     applications_without_published_docs = 0
     claims_parse_failures: list[dict[str, str]] = []
-    skipped_files: list[dict[str, str]] = []
+    skipped_records: list[dict[str, str]] = []
+    shards_written = 0
+    stop = False
 
-    for path in paths:
-        raw = load_raw_json(path)
-        if raw is None:
-            skipped += 1
-            skipped_files.append({"input_file": path.name, "reason": "load_error"})
+    for shard_path in shard_paths:
+        if stop:
+            break
+        shard_idx = parse_shard_index(shard_path)
+        if shard_idx is None:
             continue
 
-        record = clean_record(raw)
-        application_number = record["application_number"] or path.stem
-        record["application_number"] = application_number
+        cleaned_records: list[dict[str, Any]] = []
+        for raw in iter_records(shard_path):
+            if cfg.limit is not None and records_in >= cfg.limit:
+                stop = True
+                break
+            records_in += 1
 
-        if not record["publishedDocuments"]:
-            applications_without_published_docs += 1
-
-        response = raw.get("response") if isinstance(raw.get("response"), dict) else {}
-        raw_docs = response.get("publishedDocuments") or []
-        if isinstance(raw_docs, list):
-            for raw_doc, cleaned_doc in zip(raw_docs, record["publishedDocuments"]):
-                if not isinstance(raw_doc, dict):
-                    continue
-                claims_text = raw_doc.get("claimsText") or ""
-                if not isinstance(claims_text, str) or not claims_text.strip():
-                    continue
-                docs_with_claims_text += 1
-                if cleaned_doc.get("claims_parse_ok"):
-                    docs_parse_ok += 1
-                else:
-                    docs_parse_fail += 1
-                    failure = {
-                        "application_number": application_number,
-                        "documentTypeCode": str(
-                            raw_doc.get("documentTypeCode") or ""
-                        ),
-                        "fileName": str(raw_doc.get("fileName") or ""),
+            record = clean_record(raw)
+            application_number = record["application_number"]
+            if not application_number:
+                skipped += 1
+                skipped_records.append(
+                    {
+                        "input_shard": shard_path.name,
+                        "reason": "empty application_number",
                     }
-                    claims_parse_failures.append(failure)
-                    logger.info(
-                        "claims_parse_ok=false %s:%s fileName=%s",
-                        failure["application_number"],
-                        failure["documentTypeCode"] or "?",
-                        failure["fileName"],
-                    )
+                )
+                continue
 
-        try:
-            out_path = write_cleaned(cfg.output_dir, application_number, record)
-        except ValueError as exc:
-            logger.warning("skip %s: %s", path.name, exc)
-            skipped += 1
-            skipped_files.append(
-                {"input_file": path.name, "reason": str(exc)}
+            if not record["publishedDocuments"]:
+                applications_without_published_docs += 1
+
+            (
+                docs_with_claims_text,
+                docs_parse_ok,
+                docs_parse_fail,
+            ) = _tally_claims_stats(
+                raw,
+                record,
+                application_number,
+                docs_with_claims_text=docs_with_claims_text,
+                docs_parse_ok=docs_parse_ok,
+                docs_parse_fail=docs_parse_fail,
+                claims_parse_failures=claims_parse_failures,
             )
-            continue
-        written += 1
-        logger.debug("wrote %s", _display_path(out_path))
+            cleaned_records.append(record)
+            written += 1
+
+        if cleaned_records:
+            out_path = shard_jsonl_gz_path(cfg.output_dir, shard_idx)
+            write_jsonl_gz_records(out_path, cleaned_records)
+            shards_written += 1
+            logger.info(
+                "wrote %s records=%s",
+                _display_path(out_path),
+                len(cleaned_records),
+            )
 
     summary = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "input_dir": _display_path(cfg.input_dir),
         "output_dir": _display_path(cfg.output_dir),
         "limit": cfg.limit,
-        "files_in": len(paths),
+        "shards_in": len(shard_paths),
+        "shards_written": shards_written,
+        "records_in": records_in,
         "written": written,
         "skipped": skipped,
         "applications_without_published_documents": (
@@ -352,17 +367,18 @@ def run(cfg: CleanConfig) -> int:
         "claims_parse_ok": docs_parse_ok,
         "claims_parse_fail": docs_parse_fail,
         "claims_parse_failures": claims_parse_failures,
-        "skipped_files": skipped_files,
+        "skipped_records": skipped_records,
     }
     summary_path = write_summary(cfg.output_dir, summary)
 
     logger.info(
-        "done input=%s output=%s files_in=%s written=%s skipped=%s "
+        "done input=%s output=%s shards_in=%s records_in=%s written=%s skipped=%s "
         "docs_with_claims_text=%s claims_parse_ok=%s claims_parse_fail=%s "
         "summary=%s",
         _display_path(cfg.input_dir),
         _display_path(cfg.output_dir),
-        len(paths),
+        len(shard_paths),
+        records_in,
         written,
         skipped,
         docs_with_claims_text,
@@ -375,7 +391,10 @@ def run(cfg: CleanConfig) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Clean Patent Search interim JSON into analysis-ready interim JSON."
+        description=(
+            "Clean Patent Search interim JSONL.GZ shards into analysis-ready "
+            "JSONL.GZ shards."
+        )
     )
     p.add_argument(
         "--config",
@@ -399,7 +418,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--limit",
         type=int,
         default=None,
-        help="Optional cap on number of input files to process",
+        help="Optional cap on number of input records to process",
     )
     p.add_argument(
         "-v",
