@@ -35,17 +35,28 @@ DEFAULT_CONFIG = REPO_ROOT / "scrape" / "config" / "clean_patent_search.yaml"
 SUMMARY_FILENAME = "summary.json"
 
 _MIN_CLAIM_BODY_CHARS = 20
+_MIN_CLAIM_LETTER_RATIO = 0.35
 _WO_PCT_HEADER = re.compile(
     r"WO\s+\d{4}/\d+\s+PCT/[A-Z]{2}\d{4}/\d+",
     flags=re.IGNORECASE,
 )
-# Match the section header "CLAIMS" / "CLAIMS:" only — not the word "claim" in
-# bodies like "The assembly of claim 1".
+# Match "CLAIMS" even when glued to digits: "...059602CLAIMS1. A ..."
 _CLAIMS_PREAMBLE = re.compile(
-    r"\bCLAIMS\b:?|What is claimed is:?",
+    r"CLAIMS:?|What is claimed is:?",
     flags=re.IGNORECASE,
 )
-_CLAIM_BOUNDARY = re.compile(r"(?:(?<=\s)|^)(\d{1,3})\.\s+")
+# Page footers / running headers common in OCR claimsText.
+_PAGE_MARKER = re.compile(r"(?<![\dA-Za-z])-?\d{2,4}-(?![\dA-Za-z])")
+# "1. A composition" / "2. The method" — allow glue after a letter ("AS.2. The").
+# Require a plausible claim start (capital letter, quote, or open paren).
+_CLAIM_BOUNDARY = re.compile(
+    r"(?:(?<=\s)|(?<=[A-Za-z\)\]\"'.;])|^)(\d{1,3})\.\s+(?=[\"'(\[]?[A-Z(])"
+)
+# EPO-style markers: "[Claim 1] Grinder ..."
+_CLAIM_BRACKET = re.compile(
+    r"\[\s*Claim\s+(\d{1,3})\s*\]",
+    flags=re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -90,36 +101,118 @@ def write_summary(output_dir: Path, summary: dict[str, Any]) -> Path:
     return path
 
 
-def parse_claims(claims_text: str) -> tuple[list[str], bool]:
-    """Split messy PDF/OCR claimsText into numbered claim strings.
-
-    Returns ``(claims, claims_parse_ok)``. ``claims_parse_ok`` is true only when
-    at least one claim is recovered and the first starts with ``1.``.
-    """
-    if not claims_text or not claims_text.strip():
-        return [], False
-
+def _normalize_claims_text(claims_text: str) -> str:
     text = claims_text.replace("\x0c", " ").replace("\x0e", " ")
     text = _WO_PCT_HEADER.sub(" ", text)
+    # Ensure "CLAIMS1." / "CLAIMSWhat" can be split cleanly.
+    text = re.sub(r"(?i)CLAIMS(?=\d)", "CLAIMS ", text)
+    text = re.sub(r"(?i)CLAIMS(?=What)", "CLAIMS ", text)
     text = _CLAIMS_PREAMBLE.sub(" ", text)
+    # "69AS.2. The" → "69AS. 2. The"
+    text = re.sub(r"([A-Za-z]\.)(\d{1,3}\.\s+)", r"\1 \2", text)
+    # Pad page markers but keep them so per-claim cleanup can cut there.
+    text = _PAGE_MARKER.sub(lambda m: f" {m.group(0)} ", text)
     text = re.sub(r"\s+", " ", text).strip()
+    return text
 
+
+def _claim_body(chunk: str) -> str:
+    if "." not in chunk:
+        return ""
+    return chunk.split(".", 1)[-1].strip()
+
+
+def _clean_claim_body(body: str) -> str:
+    body = _WO_PCT_HEADER.sub(" ", body)
+    # Cut at first page marker so later OCR debris is not glued onto this claim.
+    body = _PAGE_MARKER.split(body, maxsplit=1)[0]
+    body = re.sub(r"\s+", " ", body).strip()
+    body = re.sub(r"[.\-–—\s]+$", "", body).strip()
+    return body
+
+
+def _body_looks_like_claim(body: str) -> bool:
+    if len(body) < _MIN_CLAIM_BODY_CHARS:
+        return False
+    letters = sum(1 for c in body if c.isalpha())
+    if letters / max(len(body), 1) < _MIN_CLAIM_LETTER_RATIO:
+        return False
+    # Reject leftover running-header crumbs.
+    if re.fullmatch(r"[\d\W_]+", body):
+        return False
+    return True
+
+
+def _claim_number(claim: str) -> int | None:
+    match = re.match(r"^(\d{1,3})\.", claim)
+    if not match:
+        return None
+    return int(match.group(1))
+
+
+def _contiguous_prefix(claims: list[str]) -> list[str]:
+    """Keep longest prefix numbered 1, 2, 3, … without gaps."""
+    kept: list[str] = []
+    expected = 1
+    for claim in claims:
+        num = _claim_number(claim)
+        if num != expected:
+            break
+        kept.append(claim)
+        expected += 1
+    return kept
+
+
+def _split_numbered_dot_claims(text: str) -> list[str]:
     matches = list(_CLAIM_BOUNDARY.finditer(text))
     if not matches:
-        return [], False
-
+        return []
     claims: list[str] = []
     for i, match in enumerate(matches):
         start = match.start()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        chunk = re.sub(r"\s+", " ", text[start:end]).strip()
-        # Boundary match is "N. "; require a real body after the number.
-        body = chunk.split(".", 1)[-1].strip() if "." in chunk else ""
-        if len(body) < _MIN_CLAIM_BODY_CHARS:
+        number = match.group(1)
+        body = _clean_claim_body(_claim_body(text[start:end]))
+        if not _body_looks_like_claim(body):
             continue
-        claims.append(chunk)
+        claims.append(f"{number}. {body}")
+    return claims
 
-    ok = bool(claims) and claims[0].startswith("1.")
+
+def _split_bracket_claims(text: str) -> list[str]:
+    matches = list(_CLAIM_BRACKET.finditer(text))
+    if not matches:
+        return []
+    claims: list[str] = []
+    for i, match in enumerate(matches):
+        start = match.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        number = match.group(1)
+        body = _clean_claim_body(text[start:end])
+        # Drop a leading ":" or "-" often left after [Claim N]
+        body = re.sub(r"^[\s:\-–—]+", "", body)
+        if not _body_looks_like_claim(body):
+            continue
+        claims.append(f"{number}. {body}")
+    return claims
+
+
+def parse_claims(claims_text: str) -> tuple[list[str], bool]:
+    """Split messy PDF/OCR claimsText into numbered claim strings.
+
+    Returns ``(claims, claims_parse_ok)``. ``claims_parse_ok`` is true only when
+    claims form a contiguous sequence starting at ``1.`` with non-empty bodies.
+    """
+    if not claims_text or not claims_text.strip():
+        return [], False
+
+    text = _normalize_claims_text(claims_text)
+    claims = _split_numbered_dot_claims(text)
+    if not claims:
+        claims = _split_bracket_claims(text)
+
+    claims = _contiguous_prefix(claims)
+    ok = bool(claims) and _claim_number(claims[0]) == 1
     return claims, ok
 
 
