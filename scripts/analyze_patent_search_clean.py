@@ -72,7 +72,10 @@ def _load_tokenizer(name: str) -> Any:
             "transformers is required for BERT token counts. "
             "Install with: pip install -r requirements.txt"
         ) from exc
-    tokenizer = AutoTokenizer.from_pretrained(name)
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(name, local_files_only=True)
+    except Exception:
+        tokenizer = AutoTokenizer.from_pretrained(name)
     # Allow counting full text lengths without the 512-position warning.
     tokenizer.model_max_length = int(1e9)
     return tokenizer
@@ -127,6 +130,61 @@ def _write_ipc_csv(path: Path, counts: Counter[str]) -> None:
         writer.writeheader()
         for label, n in counts.most_common():
             writer.writerow({"ipcr_classification": label, "n_patents": n})
+
+
+def _ipc_freq_of_freq(counts: Counter[str]) -> Counter[int]:
+    """Map patents-per-code → how many IPC codes have that patent count."""
+    return Counter(counts.values())
+
+
+def _write_ipc_freq_of_freq_csv(path: Path, freq_of_freq: Counter[int]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f, fieldnames=["n_patents_per_code", "n_ipc_codes"]
+        )
+        writer.writeheader()
+        for n_patents, n_codes in sorted(freq_of_freq.items()):
+            writer.writerow(
+                {"n_patents_per_code": n_patents, "n_ipc_codes": n_codes}
+            )
+
+
+def _write_ipc_tail_summary_csv(
+    path: Path, counts: Counter[str], freq_of_freq: Counter[int]
+) -> None:
+    n_codes = len(counts)
+    n_singleton = freq_of_freq.get(1, 0)
+    n_le5 = sum(n for k, n in freq_of_freq.items() if k <= 5)
+    total_assignments = sum(counts.values())
+    singleton_assignments = n_singleton  # each singleton code → 1 patent assignment
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["metric", "value"])
+        writer.writeheader()
+        rows = [
+            ("n_ipc_codes", n_codes),
+            ("n_singleton_codes", n_singleton),
+            (
+                "pct_singleton_codes",
+                round(100.0 * n_singleton / n_codes, 2) if n_codes else 0,
+            ),
+            ("n_codes_with_le_5_patents", n_le5),
+            (
+                "pct_codes_with_le_5_patents",
+                round(100.0 * n_le5 / n_codes, 2) if n_codes else 0,
+            ),
+            ("n_patent_ipc_assignments", total_assignments),
+            ("n_singleton_assignments", singleton_assignments),
+            (
+                "pct_assignments_from_singletons",
+                round(100.0 * singleton_assignments / total_assignments, 2)
+                if total_assignments
+                else 0,
+            ),
+        ]
+        for metric, value in rows:
+            writer.writerow({"metric": metric, "value": value})
 
 
 def collect_metrics(input_dir: Path, tokenizer: Any) -> dict[str, Any]:
@@ -227,6 +285,15 @@ def write_tables(metrics: dict[str, Any], tables_dir: Path) -> list[Path]:
 
     path = tables_dir / "ipc_label_patent_counts.csv"
     _write_ipc_csv(path, metrics["ipc_counts"])
+    written.append(path)
+
+    freq_of_freq = _ipc_freq_of_freq(metrics["ipc_counts"])
+    path = tables_dir / "ipc_code_frequency_of_frequencies.csv"
+    _write_ipc_freq_of_freq_csv(path, freq_of_freq)
+    written.append(path)
+
+    path = tables_dir / "ipc_code_tail_summary.csv"
+    _write_ipc_tail_summary_csv(path, metrics["ipc_counts"], freq_of_freq)
     written.append(path)
 
     return written
@@ -433,6 +500,31 @@ def write_plots(metrics: dict[str, Any], plots_dir: Path) -> list[Path]:
         ax.set_title("IPC labels vs number of patents (no data)")
     fig.tight_layout()
     path = plots_dir / "ipc_label_patent_counts.png"
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    written.append(path)
+
+    # 7) Frequency-of-frequencies: long tail (esp. singleton IPC codes)
+    fig, ax = plt.subplots(figsize=(8, 5))
+    freq_of_freq = _ipc_freq_of_freq(counts)
+    if freq_of_freq:
+        xs = sorted(freq_of_freq.keys())
+        ys = [freq_of_freq[x] for x in xs]
+        ax.bar(xs, ys, color="#293241", width=0.8, align="center")
+        ax.set_yscale("log")
+        n_singleton = freq_of_freq.get(1, 0)
+        n_codes = sum(freq_of_freq.values())
+        pct = 100.0 * n_singleton / n_codes if n_codes else 0.0
+        ax.set_title(
+            f"IPC code frequency-of-frequencies "
+            f"({n_singleton} singletons, {pct:.1f}% of {n_codes} codes)"
+        )
+    else:
+        ax.set_title("IPC code frequency-of-frequencies (no data)")
+    ax.set_xlabel("Patents per IPC code")
+    ax.set_ylabel("Number of IPC codes (log scale)")
+    fig.tight_layout()
+    path = plots_dir / "hist_ipc_code_patent_frequency.png"
     fig.savefig(path, dpi=150)
     plt.close(fig)
     written.append(path)
