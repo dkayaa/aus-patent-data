@@ -93,3 +93,15 @@ From `patent_search_clean` (primary published document per patent: prefer B* ove
 | `plots/hist_ipc_code_patent_frequency.png` | Frequency-of-frequencies (long-tail / singletons) |
 
 Length plots use BERT WordPiece token counts (default tokenizer `bert-base-uncased`, excluding special tokens). Override with `--tokenizer`.
+
+### AI / IPC subset
+
+Filter to patents with ≥1 matching IPC prefix and write under separate dirs (does not overwrite the full-corpus outputs):
+
+```bash
+.venv/bin/python scripts/analyze_patent_search_clean.py --ipc-prefix G06N
+# → data/tables/ipc_G06N/, data/plots/ipc_G06N/
+
+.venv/bin/python scripts/analyze_patent_search_clean.py --ipc-prefix G06N --ipc-prefix G06V
+# → data/tables/ipc_G06N+G06V/, data/plots/ipc_G06N+G06V/
+```

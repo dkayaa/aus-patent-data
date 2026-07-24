@@ -36,6 +36,52 @@ DEFAULT_TOKENIZER = "bert-base-uncased"
 BERT_MAX_POSITIONS = 512
 _TOKENIZE_BATCH = 256
 
+
+def _normalize_ipc(code: str) -> str:
+    return code.strip().upper().replace(" ", "")
+
+
+def _parse_ipc_prefixes(raw: list[str] | None) -> list[str]:
+    """Flatten ``--ipc-prefix G06N --ipc-prefix G06V`` / comma-separated values."""
+    if not raw:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        for part in item.split(","):
+            prefix = _normalize_ipc(part)
+            if prefix and prefix not in seen:
+                seen.add(prefix)
+                out.append(prefix)
+    return out
+
+
+def _ipc_codes_from_record(data: dict[str, Any]) -> list[str]:
+    codes: list[str] = []
+    for code in data.get("ipcrClassification") or []:
+        if isinstance(code, str) and code.strip():
+            codes.append(code.strip())
+    return codes
+
+
+def _matches_ipc_prefixes(codes: list[str], prefixes: list[str]) -> bool:
+    if not prefixes:
+        return True
+    for code in codes:
+        norm = _normalize_ipc(code)
+        if any(norm.startswith(p) for p in prefixes):
+            return True
+    return False
+
+
+def _subset_slug(prefixes: list[str]) -> str:
+    return "+".join(prefixes) if prefixes else "all"
+
+
+def _with_subset(title: str, subset_label: str) -> str:
+    return f"{title}{subset_label}" if subset_label else title
+
+
 # Higher rank = preferred published document for patent-level stats.
 _DOC_TYPE_RANK = {
     "B9": 60,
@@ -187,7 +233,13 @@ def _write_ipc_tail_summary_csv(
             writer.writerow({"metric": metric, "value": value})
 
 
-def collect_metrics(input_dir: Path, tokenizer: Any) -> dict[str, Any]:
+def collect_metrics(
+    input_dir: Path,
+    tokenizer: Any,
+    *,
+    ipc_prefixes: list[str] | None = None,
+) -> dict[str, Any]:
+    prefixes = list(ipc_prefixes or [])
     claim_texts_all: list[str] = []
     # Parallel list: patent index into claims_per_patent / vs-num accumulators
     claim_patent_indices: list[int] = []
@@ -197,16 +249,21 @@ def collect_metrics(input_dir: Path, tokenizer: Any) -> dict[str, Any]:
     claims_per_patent: list[int] = []
     ipc_counts: Counter[str] = Counter()
     n_patents = 0
+    n_scanned = 0
     n_with_primary_claims = 0
     n_with_primary_abstract = 0
 
     for data in iter_shard_records(input_dir, include_open_jsonl=False):
+        n_scanned += 1
+        codes = _ipc_codes_from_record(data)
+        if not _matches_ipc_prefixes(codes, prefixes):
+            continue
+
         patent_i = n_patents
         n_patents += 1
 
-        for code in data.get("ipcrClassification") or []:
-            if isinstance(code, str) and code.strip():
-                ipc_counts[code.strip()] += 1
+        for code in codes:
+            ipc_counts[code] += 1
 
         docs_raw = data.get("publishedDocuments") or []
         docs = [d for d in docs_raw if isinstance(d, dict)]
@@ -247,8 +304,14 @@ def collect_metrics(input_dir: Path, tokenizer: Any) -> dict[str, Any]:
         zip(abstract_n_claims, abstract_token_lengths)
     )
 
+    if prefixes:
+        subset_label = f" [IPC prefix {'|'.join(prefixes)}]"
+    else:
+        subset_label = ""
+
     return {
         "n_patents": n_patents,
+        "n_scanned": n_scanned,
         "n_with_primary_claims": n_with_primary_claims,
         "n_with_primary_abstract": n_with_primary_abstract,
         "claim_token_lengths": claim_token_lengths,
@@ -258,6 +321,8 @@ def collect_metrics(input_dir: Path, tokenizer: Any) -> dict[str, Any]:
         "abstract_tokens_vs_num": abstract_tokens_vs_num,
         "ipc_counts": ipc_counts,
         "tokenizer_name": getattr(tokenizer, "name_or_path", DEFAULT_TOKENIZER),
+        "ipc_prefixes": prefixes,
+        "subset_label": subset_label,
     }
 
 
@@ -363,6 +428,7 @@ def write_plots(metrics: dict[str, Any], plots_dir: Path) -> list[Path]:
     written: list[Path] = []
     q = 99.0
     tok_name = metrics.get("tokenizer_name", DEFAULT_TOKENIZER)
+    subset = metrics.get("subset_label", "")
 
     # 1) Claim token length histogram
     fig, ax = plt.subplots(figsize=(8, 5))
@@ -382,7 +448,7 @@ def write_plots(metrics: dict[str, Any], plots_dir: Path) -> list[Path]:
         if n_above:
             title += f"; {n_above} above omitted"
         title += ")"
-    ax.set_title(title)
+    ax.set_title(_with_subset(title, subset))
     _maybe_mark_bert_limit(ax, xmax=cap)
     fig.tight_layout()
     path = plots_dir / "hist_claim_token_length.png"
@@ -412,7 +478,7 @@ def write_plots(metrics: dict[str, Any], plots_dir: Path) -> list[Path]:
             bits.append(f"{n_above} above omitted")
     if bits:
         title += " (" + "; ".join(bits) + ")"
-    ax.set_title(title)
+    ax.set_title(_with_subset(title, subset))
     fig.tight_layout()
     path = plots_dir / "hist_num_claims_per_patent.png"
     fig.savefig(path, dpi=150)
@@ -429,7 +495,9 @@ def write_plots(metrics: dict[str, Any], plots_dir: Path) -> list[Path]:
         fig.colorbar(hb, ax=ax, label="Patents")
     ax.set_xlabel("Number of claims")
     ax.set_ylabel(f"Mean BERT tokens per claim ({tok_name})")
-    ax.set_title(f"Claim tokens vs number of claims (per patent){note}")
+    ax.set_title(
+        _with_subset(f"Claim tokens vs number of claims (per patent){note}", subset)
+    )
     fig.tight_layout()
     path = plots_dir / "hist2d_claim_tokens_vs_num_claims.png"
     fig.savefig(path, dpi=150)
@@ -456,7 +524,7 @@ def write_plots(metrics: dict[str, Any], plots_dir: Path) -> list[Path]:
         if n_above:
             title += f"; {n_above} above omitted"
         title += ")"
-    ax.set_title(title)
+    ax.set_title(_with_subset(title, subset))
     _maybe_mark_bert_limit(ax, xmax=cap)
     fig.tight_layout()
     path = plots_dir / "hist_abstract_token_length.png"
@@ -474,7 +542,11 @@ def write_plots(metrics: dict[str, Any], plots_dir: Path) -> list[Path]:
         fig.colorbar(hb, ax=ax, label="Patents")
     ax.set_xlabel("Number of claims")
     ax.set_ylabel(f"BERT tokens per abstract ({tok_name})")
-    ax.set_title(f"Abstract tokens vs number of claims (per patent){note}")
+    ax.set_title(
+        _with_subset(
+            f"Abstract tokens vs number of claims (per patent){note}", subset
+        )
+    )
     fig.tight_layout()
     path = plots_dir / "hist2d_abstract_tokens_vs_num_claims.png"
     fig.savefig(path, dpi=150)
@@ -495,9 +567,11 @@ def write_plots(metrics: dict[str, Any], plots_dir: Path) -> list[Path]:
         title_n = len(top)
         total = len(counts)
         suffix = f" (top {title_n} of {total})" if total > title_n else ""
-        ax.set_title(f"IPC labels vs number of patents{suffix}")
+        ax.set_title(
+            _with_subset(f"IPC labels vs number of patents{suffix}", subset)
+        )
     else:
-        ax.set_title("IPC labels vs number of patents (no data)")
+        ax.set_title(_with_subset("IPC labels vs number of patents (no data)", subset))
     fig.tight_layout()
     path = plots_dir / "ipc_label_patent_counts.png"
     fig.savefig(path, dpi=150)
@@ -516,11 +590,16 @@ def write_plots(metrics: dict[str, Any], plots_dir: Path) -> list[Path]:
         n_codes = sum(freq_of_freq.values())
         pct = 100.0 * n_singleton / n_codes if n_codes else 0.0
         ax.set_title(
-            f"IPC code frequency-of-frequencies "
-            f"({n_singleton} singletons, {pct:.1f}% of {n_codes} codes)"
+            _with_subset(
+                f"IPC code frequency-of-frequencies "
+                f"({n_singleton} singletons, {pct:.1f}% of {n_codes} codes)",
+                subset,
+            )
         )
     else:
-        ax.set_title("IPC code frequency-of-frequencies (no data)")
+        ax.set_title(
+            _with_subset("IPC code frequency-of-frequencies (no data)", subset)
+        )
     ax.set_xlabel("Patents per IPC code")
     ax.set_ylabel("Number of IPC codes (log scale)")
     fig.tight_layout()
@@ -545,14 +624,30 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--tables-dir",
         type=Path,
-        default=DEFAULT_TABLES,
-        help=f"CSV output dir (default: {DEFAULT_TABLES})",
+        default=None,
+        help=(
+            f"CSV output dir (default: {DEFAULT_TABLES}, or "
+            f"{DEFAULT_TABLES}/ipc_<PREFIX> when --ipc-prefix is set)"
+        ),
     )
     p.add_argument(
         "--plots-dir",
         type=Path,
-        default=DEFAULT_PLOTS,
-        help=f"Plot output dir (default: {DEFAULT_PLOTS})",
+        default=None,
+        help=(
+            f"Plot output dir (default: {DEFAULT_PLOTS}, or "
+            f"{DEFAULT_PLOTS}/ipc_<PREFIX> when --ipc-prefix is set)"
+        ),
+    )
+    p.add_argument(
+        "--ipc-prefix",
+        action="append",
+        default=None,
+        metavar="PREFIX",
+        help=(
+            "Keep patents with ≥1 IPC code starting with PREFIX "
+            "(repeatable or comma-separated). Example: --ipc-prefix G06N"
+        ),
     )
     p.add_argument(
         "--tokenizer",
@@ -577,23 +672,50 @@ def main(argv: list[str] | None = None) -> int:
     input_dir = args.input_dir
     if not input_dir.is_absolute():
         input_dir = REPO_ROOT / input_dir
-    tables_dir = args.tables_dir if args.tables_dir.is_absolute() else REPO_ROOT / args.tables_dir
-    plots_dir = args.plots_dir if args.plots_dir.is_absolute() else REPO_ROOT / args.plots_dir
+
+    ipc_prefixes = _parse_ipc_prefixes(args.ipc_prefix)
+    slug = _subset_slug(ipc_prefixes)
+
+    if args.tables_dir is None:
+        tables_dir = (
+            DEFAULT_TABLES / f"ipc_{slug}" if ipc_prefixes else DEFAULT_TABLES
+        )
+    else:
+        tables_dir = args.tables_dir
+        if not tables_dir.is_absolute():
+            tables_dir = REPO_ROOT / tables_dir
+
+    if args.plots_dir is None:
+        plots_dir = DEFAULT_PLOTS / f"ipc_{slug}" if ipc_prefixes else DEFAULT_PLOTS
+    else:
+        plots_dir = args.plots_dir
+        if not plots_dir.is_absolute():
+            plots_dir = REPO_ROOT / plots_dir
 
     if not input_dir.is_dir():
         print(f"error: input_dir does not exist: {input_dir}", file=sys.stderr)
         return 1
 
     print(f"loading tokenizer={args.tokenizer}")
+    if ipc_prefixes:
+        print(f"filter ipc_prefixes={ipc_prefixes}")
     tokenizer = _load_tokenizer(args.tokenizer)
-    metrics = collect_metrics(input_dir, tokenizer)
+    metrics = collect_metrics(input_dir, tokenizer, ipc_prefixes=ipc_prefixes)
     print(
         f"patents={metrics['n_patents']} "
+        f"(scanned={metrics['n_scanned']}) "
         f"with_claims={metrics['n_with_primary_claims']} "
         f"with_abstract={metrics['n_with_primary_abstract']} "
         f"ipc_labels={len(metrics['ipc_counts'])} "
         f"tokenizer={metrics['tokenizer_name']}"
     )
+    if metrics["n_patents"] == 0:
+        print(
+            "error: no patents matched the filter "
+            f"(prefixes={ipc_prefixes or 'none'})",
+            file=sys.stderr,
+        )
+        return 1
 
     if not args.plots_only:
         for path in write_tables(metrics, tables_dir):
