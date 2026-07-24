@@ -92,6 +92,7 @@ aus-patent-data/
 
 - Base toy sample: `data/raw/application-toy.csv` (IP Rapid-style application rows).
 - Patent Search API enrichment: `scrape/src/patent_search.py` → `data/interim/patent_search/`.
+- Patent Search clean: `scrape/src/clean_patent_search.py` → `data/interim/patent_search_clean/`.
 - Classification: not implemented yet.
 
 ## Reproduction (partial)
@@ -101,6 +102,7 @@ pip install -r requirements.txt
 export IP_AUSTRALIA_CLIENT_ID='...'
 export IP_AUSTRALIA_CLIENT_SECRET='...'
 python scripts/fetch_patent_search.py
+python scripts/clean_patent_search.py
 ```
 
 See `scrape/README.md` for config (client credentials → JWT, `max_responses`, backoff) and idempotent re-runs.

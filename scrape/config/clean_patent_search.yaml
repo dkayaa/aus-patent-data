@@ -1,0 +1,7 @@
+# Reshape raw Patent Search interim JSON → analysis-ready interim JSON.
+
+paths:
+  # Absolute or repo-relative. Created if missing (parents=True).
+  input_dir: data/interim/patent_search
+  output_dir: data/interim/patent_search_clean
+  # Also writes {output_dir}/summary.json (counts + claims_parse_failures).

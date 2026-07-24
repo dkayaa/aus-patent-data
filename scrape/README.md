@@ -84,3 +84,21 @@ python scripts/fetch_patent_search.py
 # Cap new fetches for a smoke test
 python scripts/fetch_patent_search.py --max-responses 5 -v
 ```
+
+## Cleaner (reshape interim)
+
+Post-process raw Patent Search caches into a flatter analysis-ready interim set (no API calls).
+
+| | |
+|---|---|
+| Config | `config/clean_patent_search.yaml` |
+| Module | `src/clean_patent_search.py` |
+| **Reads** | `paths.input_dir` (default `data/interim/patent_search/`) |
+| **Writes** | `paths.output_dir` (default `data/interim/patent_search_clean/{application_number}.json`) plus `summary.json` |
+
+Each cleaned file keeps status/title/IPC/parties/dates plus `publishedDocuments[]` with `abstract` and parsed `claims` (`claims_parse_ok` flags OCR/split failures). Outputs are always rewritten (deterministic, cheap). The run also writes `summary.json` in the output dir with counts and the full `claims_parse_failures` list.
+
+```bash
+python scripts/clean_patent_search.py
+python scripts/clean_patent_search.py --limit 5 -v
+```

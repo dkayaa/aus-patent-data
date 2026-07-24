@@ -37,10 +37,22 @@ Scrapers use `application_number` (and related IDs) to pull semantic text from t
 | Path | Producer | Role |
 |------|----------|------|
 | Configured by `scrape/config/patent_search.yaml` → `paths.output_dir` (default external: `/Volumes/T7/patent-aus/data/interim/patent_search/`) | `scrape/src/patent_search.py` | Raw Patent Search API responses |
+| `interim/patent_search_clean/` (or `scrape/config/clean_patent_search.yaml` → `paths.output_dir`) | `scrape/src/clean_patent_search.py` | Flattened records with parsed claims |
+
+### `patent_search_clean` schema
+
+One JSON per application:
+
+- `application_number`, `fetched_at`, `ipRightStatusCode`, `inventionTitle`
+- `ipcrClassification` (list of classification strings)
+- `patentApplicationType`, `filedDate`, `priorityDate`, `expiryDate`
+- `applicant`, `inventors` (name lists)
+- `publishedDocuments[]`: `documentTypeCode`, `fileName`, `abstract`, `claims` (list of numbered claim strings), `claims_parse_ok`
+- `summary.json` in the same folder: run counts + full `claims_parse_failures` list for triage
 
 ## Schema (enriched / final)
 
-TBD once API fields and labels are fixed.
+TBD once labels are fixed.
 
 ## Regeneration
 
@@ -48,6 +60,7 @@ TBD once API fields and labels are fixed.
 export IP_AUSTRALIA_CLIENT_ID='...'
 export IP_AUSTRALIA_CLIENT_SECRET='...'
 python scripts/fetch_patent_search.py
+python scripts/clean_patent_search.py
 ```
 
 See `scrape/README.md` for config and idempotency notes.
