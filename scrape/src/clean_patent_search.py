@@ -242,18 +242,52 @@ def _invention_title(bibliographic: dict[str, Any]) -> str:
     return ""
 
 
-def _ipcr_codes(bibliographic: dict[str, Any]) -> list[str]:
+def _parse_sequence_number(value: Any) -> int | None:
+    """Coerce API ``sequenceNumber`` to int; None if missing/invalid."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdigit() or (text.startswith("-") and text[1:].isdigit()):
+            return int(text)
+    return None
+
+
+def _ipcr_fields(bibliographic: dict[str, Any]) -> tuple[list[str], str]:
+    """Return ``(ipcrClassification codes, primary_ipc)``.
+
+    ``primary_ipc`` is the ``classificationText`` with the lowest
+    ``sequenceNumber`` (first / main IPC per WIPO list order). If no row
+    carries a sequence number, fall back to the first listed code.
+    """
     rows = bibliographic.get("ipcrClassification") or []
     if not isinstance(rows, list):
-        return []
+        return [], ""
+
     codes: list[str] = []
+    best_seq: int | None = None
+    primary = ""
     for row in rows:
         if not isinstance(row, dict):
             continue
         text = (row.get("classificationText") or "").strip()
-        if text:
-            codes.append(text)
-    return codes
+        if not text:
+            continue
+        codes.append(text)
+        seq = _parse_sequence_number(row.get("sequenceNumber"))
+        if seq is None:
+            continue
+        if best_seq is None or seq < best_seq:
+            best_seq = seq
+            primary = text
+
+    if not primary and codes:
+        primary = codes[0]
+    return codes, primary
 
 
 def _clean_published_document(doc: dict[str, Any]) -> dict[str, Any]:
@@ -311,12 +345,15 @@ def clean_record(raw: dict[str, Any]) -> dict[str, Any]:
             return value
         return str(value)
 
+    ipcr_codes, primary_ipc = _ipcr_fields(bibliographic)
+
     return {
         "application_number": application_number.strip(),
         "fetched_at": fetched_at,
         "ipRightStatusCode": _str_field(response.get("ipRightStatusCode")),
         "inventionTitle": _invention_title(bibliographic),
-        "ipcrClassification": _ipcr_codes(bibliographic),
+        "primary_ipc": primary_ipc,
+        "ipcrClassification": ipcr_codes,
         "patentApplicationType": _str_field(bibliographic.get("patentApplicationType")),
         "filedDate": _str_field(response.get("filedDate")),
         "priorityDate": _str_field(response.get("priorityDate")),

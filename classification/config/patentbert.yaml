@@ -1,0 +1,19 @@
+# PatentBERT CPC-subclass multi-label inference (claim-level).
+
+paths:
+  claims_csv: data/interim/patent_search_text/first_claims.csv
+  # Absolute or repo-relative. Checkpoint + labels + vocab/config (gitignored).
+  model_dir: classification/models/patentbert
+  # Absolute or repo-relative. Prepared TSV, row map, predictions.
+  output_dir: data/interim/patentbert
+
+infer:
+  # Sigmoid probability cutoff: keep CPC subclasses with score > threshold.
+  # Default 0.3 matches the upstream PatentBERT notebook.
+  multi_hot_threshold: 0.3
+  predict_batch_size: 8
+  # Cap on claim rows this run (null = all). CLI --max-predictions overrides.
+  number_of_predictions: null
+  # Must exist in labels_group_id.tsv. null = first data row (skips id/title header).
+  placeholder_group_id: A01B
+  do_lower_case: true

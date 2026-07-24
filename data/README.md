@@ -40,6 +40,8 @@ Scrapers use `application_number` (and related IDs) to pull semantic text from t
 |------|----------|------|
 | Configured by `scrape/config/patent_search.yaml` → `paths.output_dir` (default: `data/interim/patent_search/`) | `scrape/src/patent_search.py` | Raw Patent Search API responses as `part-*.jsonl.gz` + `fetched_ids.txt` |
 | `interim/patent_search_clean/` (or `scrape/config/clean_patent_search.yaml` → `paths.output_dir`) | `scrape/src/clean_patent_search.py` | Flattened records with parsed claims (`part-*.jsonl.gz`) |
+| `interim/patent_search_text/` | `scripts/export_patent_text_csvs.py` | Classification-oriented CSVs: `abstracts.csv`, `first_claims.csv`, `claims.csv` |
+| `interim/patentbert/` | `scripts/run_patentbert.py` | Claim-level PatentBERT CPC-subclass predictions (`input.tsv`, `row_map.csv`, `predict_result.txt`, `predictions.csv`) |
 
 ### `patent_search` / `patent_search_clean` storage
 
@@ -50,6 +52,7 @@ Batched JSONL.GZ shards (`part-NNNNN.jsonl.gz`), one compact JSON object per lin
 One JSONL line per application:
 
 - `application_number`, `fetched_at`, `ipRightStatusCode`, `inventionTitle`
+- `primary_ipc` (classification with lowest `sequenceNumber`; else first listed)
 - `ipcrClassification` (list of classification strings)
 - `patentApplicationType`, `filedDate`, `priorityDate`, `expiryDate`
 - `applicant`, `inventors` (name lists)

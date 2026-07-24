@@ -93,7 +93,7 @@ aus-patent-data/
 - Base toy sample: `data/raw/application-toy.csv` (IP Rapid-style application rows).
 - Patent Search API enrichment: `scrape/src/patent_search.py` → `part-*.jsonl.gz` shards under the configured `patent_search` output dir.
 - Patent Search clean: `scrape/src/clean_patent_search.py` → mirrored `part-*.jsonl.gz` under `data/interim/patent_search_clean/`.
-- Classification: not implemented yet.
+- Classification: PatentBERT claim-level CPC-subclass inference (`classification/src/run_patentbert.py` → `data/interim/patentbert/`).
 
 ## Reproduction (partial)
 
@@ -104,6 +104,13 @@ export IP_AUSTRALIA_CLIENT_SECRET='...'
 python scripts/fetch_patent_search.py
 python scripts/clean_patent_search.py
 python scripts/analyze_patent_search_clean.py
+python scripts/export_patent_text_csvs.py
+
+# PatentBERT needs a separate TF1 / Python 3.7–3.8 env (not root .venv).
+# On Apple Silicon see classification/README.md (conda osx-64 + tensorflow=1.15).
+pip install -r classification/requirements-patentbert.txt
+python scripts/download_patentbert.py
+python scripts/run_patentbert.py
 ```
 
-See `scrape/README.md` for config (client credentials → JWT, `max_responses`, backoff) and idempotent re-runs.
+See `scrape/README.md` for config (client credentials → JWT, `max_responses`, backoff) and idempotent re-runs. See `classification/README.md` for PatentBERT.

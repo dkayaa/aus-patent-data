@@ -1,0 +1,18 @@
+# PatentBERT inference (TensorFlow 1.15 only).
+#
+# Will NOT install on the repo root .venv (Python 3.13 / arm64).
+# Needs a dedicated env: Python 3.7–3.8 on Linux x86_64, or conda
+# osx-64 (Rosetta) on Apple Silicon — see classification/README.md.
+#
+# Install TensorFlow 1.15 via conda first, then:
+#   pip install -r classification/requirements-patentbert.txt
+#
+# Pins keep TF1 + matplotlib happy together (numpy 1.17–1.18).
+gdown>=4.6.0
+numpy>=1.17,<1.19
+absl-py
+matplotlib>=3.1,<3.4
+PyYAML>=5.1
+
+# Linux x86_64 / Python 3.7–3.8 only (uncomment if not using conda for TF):
+# tensorflow==1.15.5
