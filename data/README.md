@@ -24,11 +24,11 @@ Metadata / lifecycle fields only (no patent body text):
 - `application_date`, `earliest_filed_date`, `priority_date`
 - `gained_registration_status_date`, `gained_enforceable_status_date`, `enforceable_from_date`, `deemed_retired_date`
 
-Scrapers use `application_number` (and related IDs) to pull semantic text from the IP Australia API. Full IP Rapid dumps may be added later under `raw/` and should remain gitignored if large.
+Scrapers use `application_number` (and related IDs) to pull semantic text from the IP Australia API. Full IP Rapid dumps under `raw/` (and other bulk artifacts) are stored with **Git LFS** — see root `.gitattributes`.
 
 ## Rules
 
-- Small toys/samples may be committed; bulk dumps and large API caches are gitignored.
+- Dataset binaries/tables under `data/` go through Git LFS (not normal git blobs). Run `git lfs install` once locally before adding or pulling them.
 - Prefer regenerating enriched and labeled files from `scrape/` + `classification/` over hand-editing.
 - Update this README when schema or row counts change.
 

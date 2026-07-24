@@ -1,14 +1,4 @@
-# Bulk dataset artifacts (keep READMEs, gitkeeps, and small toy seeds)
-data/raw/**
-data/interim/**
-data/processed/**
-!data/raw/.gitkeep
-!data/interim/.gitkeep
-!data/processed/.gitkeep
-!data/**/README.md
-!data/raw/application-toy.csv
-
-# Model weights / large binaries
+# Model weights / large binaries (not yet on LFS)
 classification/models/**
 !classification/models/.gitkeep
 !classification/models/README.md
@@ -32,4 +22,3 @@ venv/
 .idea/
 .vscode/
 *.swp
-data/

@@ -28,7 +28,7 @@ Work is organized by **pipeline stage**, not by language or framework:
 1. **Do not mix stages.** API clients and downloaders stay in `scrape/`. Labeling stays in `classification/`.
 2. **Scrape is enrichment, not discovery.** The application universe comes from IP Rapid (or a full dump later). Scrapers take `application_number` (and related IDs) from `data/raw/` and fetch text/metadata from IP Australia.
 3. **Pipeline direction:** `data/raw` (base) → `scrape/` → enriched artifacts in `data/` → `classification/` → `data/interim/` / `data/processed/`.
-4. **Toy vs bulk.** Small seed samples (e.g. `data/raw/application-toy.csv`) may be committed. Full IP Rapid dumps and large API response caches stay gitignored.
+4. **Toy vs bulk via Git LFS.** Dataset files under `data/` (`*.csv`, `*.json`, archives, etc.) are tracked with **Git LFS** (see `.gitattributes`). Pointers live in git; blobs live in LFS storage. Install with `git lfs install` before cloning/pulling data.
 5. **Prefer importable modules over notebooks** for anything that must be reproducible for the paper.
 6. **Document sources and regeneration** in each stage README (what is read, what is written, how to run).
 7. **Paper alignment.** Prefer names that map to methods: base dump, API enrichment, labeling, dataset release.
@@ -62,7 +62,7 @@ Each stage should use **explicit paths** (config or CLI args).
 
 - Treating scrape as “download the whole IP Rapid dump” (that dump is the *input*; API text is the scrape target).
 - Mixing scrape + classification into a single `src/` tree.
-- Committing full production dumps or large API caches to git.
+- Committing large dataset files as normal git blobs (use Git LFS patterns in `.gitattributes` instead).
 
 ## Repository layout
 
