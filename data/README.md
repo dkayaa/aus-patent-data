@@ -78,13 +78,15 @@ From `patent_search_clean` (primary published document per patent: prefer B* ove
 
 | Path | Contents |
 |------|----------|
-| `tables/chars_per_claim.csv` | min / max / mean claim character length |
-| `tables/chars_per_abstract.csv` | min / max / mean abstract character length |
+| `tables/tokens_per_claim.csv` | min / max / mean claim length in BERT WordPiece tokens |
+| `tables/tokens_per_abstract.csv` | min / max / mean abstract length in BERT WordPiece tokens |
 | `tables/num_claims_per_patent.csv` | min / max / mean claims per patent |
 | `tables/ipc_label_patent_counts.csv` | IPC code → patent count |
-| `plots/hist_claim_char_length.png` | Claim length histogram |
+| `plots/hist_claim_token_length.png` | Claim token-length histogram (`bert-base-uncased`) |
 | `plots/hist_num_claims_per_patent.png` | Claims-per-patent histogram |
-| `plots/hist2d_claim_chars_vs_num_claims.png` | Mean claim chars vs num claims |
-| `plots/hist_abstract_char_length.png` | Abstract length histogram |
-| `plots/hist2d_abstract_chars_vs_num_claims.png` | Abstract chars vs num claims |
+| `plots/hist2d_claim_tokens_vs_num_claims.png` | Mean claim tokens vs num claims |
+| `plots/hist_abstract_token_length.png` | Abstract token-length histogram |
+| `plots/hist2d_abstract_tokens_vs_num_claims.png` | Abstract tokens vs num claims |
 | `plots/ipc_label_patent_counts.png` | Top IPC labels by patent count |
+
+Length plots use BERT WordPiece token counts (default tokenizer `bert-base-uncased`, excluding special tokens). Override with `--tokenizer`.

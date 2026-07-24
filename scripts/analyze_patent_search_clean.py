@@ -3,6 +3,9 @@
 
 Per-patent metrics use one primary published document (prefer B* over A*) so
 A1/B2 versions of the same application are not double-counted.
+
+Text lengths are measured in BERT WordPiece tokens (default:
+``bert-base-uncased``, excluding special tokens).
 """
 
 from __future__ import annotations
@@ -29,6 +32,9 @@ from jsonl_gz import iter_shard_records  # noqa: E402
 DEFAULT_INPUT = REPO_ROOT / "data" / "interim" / "patent_search_clean"
 DEFAULT_TABLES = REPO_ROOT / "data" / "tables"
 DEFAULT_PLOTS = REPO_ROOT / "data" / "plots"
+DEFAULT_TOKENIZER = "bert-base-uncased"
+BERT_MAX_POSITIONS = 512
+_TOKENIZE_BATCH = 256
 
 # Higher rank = preferred published document for patent-level stats.
 _DOC_TYPE_RANK = {
@@ -56,6 +62,35 @@ def _select_primary_document(docs: list[dict[str, Any]]) -> dict[str, Any] | Non
         )
 
     return max(docs, key=sort_key)
+
+
+def _load_tokenizer(name: str) -> Any:
+    try:
+        from transformers import AutoTokenizer
+    except ImportError as exc:
+        raise SystemExit(
+            "transformers is required for BERT token counts. "
+            "Install with: pip install -r requirements.txt"
+        ) from exc
+    tokenizer = AutoTokenizer.from_pretrained(name)
+    # Allow counting full text lengths without the 512-position warning.
+    tokenizer.model_max_length = int(1e9)
+    return tokenizer
+
+
+def _token_lengths(tokenizer: Any, texts: list[str]) -> list[int]:
+    """WordPiece token counts excluding special tokens."""
+    lengths: list[int] = []
+    for i in range(0, len(texts), _TOKENIZE_BATCH):
+        batch = texts[i : i + _TOKENIZE_BATCH]
+        encoded = tokenizer(
+            batch,
+            add_special_tokens=False,
+            truncation=False,
+            padding=False,
+        )
+        lengths.extend(len(ids) for ids in encoded["input_ids"])
+    return lengths
 
 
 def _stats(values: list[float | int]) -> dict[str, float | int]:
@@ -94,20 +129,21 @@ def _write_ipc_csv(path: Path, counts: Counter[str]) -> None:
             writer.writerow({"ipcr_classification": label, "n_patents": n})
 
 
-def collect_metrics(input_dir: Path) -> dict[str, Any]:
-    claim_char_lengths: list[int] = []
-    abstract_char_lengths: list[int] = []
+def collect_metrics(input_dir: Path, tokenizer: Any) -> dict[str, Any]:
+    claim_texts_all: list[str] = []
+    # Parallel list: patent index into claims_per_patent / vs-num accumulators
+    claim_patent_indices: list[int] = []
+    abstract_texts: list[str] = []
+    abstract_n_claims: list[int] = []
+
     claims_per_patent: list[int] = []
-    # Per patent: (num_claims, mean_claim_chars) for 2D hist; skip if no claims
-    claim_chars_vs_num: list[tuple[int, float]] = []
-    # Per patent: (num_claims, abstract_chars) when abstract is non-empty
-    abstract_chars_vs_num: list[tuple[int, int]] = []
     ipc_counts: Counter[str] = Counter()
     n_patents = 0
     n_with_primary_claims = 0
     n_with_primary_abstract = 0
 
     for data in iter_shard_records(input_dir, include_open_jsonl=False):
+        patent_i = n_patents
         n_patents += 1
 
         for code in data.get("ipcrClassification") or []:
@@ -128,28 +164,42 @@ def collect_metrics(input_dir: Path) -> dict[str, Any]:
 
         if n_claims:
             n_with_primary_claims += 1
-            lengths = [len(c) for c in claim_texts]
-            claim_char_lengths.extend(lengths)
-            claim_chars_vs_num.append((n_claims, statistics.fmean(lengths)))
+            claim_texts_all.extend(claim_texts)
+            claim_patent_indices.extend([patent_i] * n_claims)
 
         abstract = primary.get("abstract") if isinstance(primary.get("abstract"), str) else ""
         abstract = abstract.strip()
         if abstract:
             n_with_primary_abstract += 1
-            abstract_len = len(abstract)
-            abstract_char_lengths.append(abstract_len)
-            abstract_chars_vs_num.append((n_claims, abstract_len))
+            abstract_texts.append(abstract)
+            abstract_n_claims.append(n_claims)
+
+    claim_token_lengths = _token_lengths(tokenizer, claim_texts_all)
+    abstract_token_lengths = _token_lengths(tokenizer, abstract_texts)
+
+    # Mean claim tokens per patent (for 2D plot)
+    tokens_by_patent: dict[int, list[int]] = {}
+    for patent_i, n_tok in zip(claim_patent_indices, claim_token_lengths):
+        tokens_by_patent.setdefault(patent_i, []).append(n_tok)
+    claim_tokens_vs_num: list[tuple[int, float]] = [
+        (claims_per_patent[i], statistics.fmean(toks))
+        for i, toks in tokens_by_patent.items()
+    ]
+    abstract_tokens_vs_num: list[tuple[int, int]] = list(
+        zip(abstract_n_claims, abstract_token_lengths)
+    )
 
     return {
         "n_patents": n_patents,
         "n_with_primary_claims": n_with_primary_claims,
         "n_with_primary_abstract": n_with_primary_abstract,
-        "claim_char_lengths": claim_char_lengths,
-        "abstract_char_lengths": abstract_char_lengths,
+        "claim_token_lengths": claim_token_lengths,
+        "abstract_token_lengths": abstract_token_lengths,
         "claims_per_patent": claims_per_patent,
-        "claim_chars_vs_num": claim_chars_vs_num,
-        "abstract_chars_vs_num": abstract_chars_vs_num,
+        "claim_tokens_vs_num": claim_tokens_vs_num,
+        "abstract_tokens_vs_num": abstract_tokens_vs_num,
         "ipc_counts": ipc_counts,
+        "tokenizer_name": getattr(tokenizer, "name_or_path", DEFAULT_TOKENIZER),
     }
 
 
@@ -157,13 +207,15 @@ def write_tables(metrics: dict[str, Any], tables_dir: Path) -> list[Path]:
     tables_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
 
-    path = tables_dir / "chars_per_claim.csv"
-    _write_summary_csv(path, "chars_per_claim", _stats(metrics["claim_char_lengths"]))
+    path = tables_dir / "tokens_per_claim.csv"
+    _write_summary_csv(
+        path, "tokens_per_claim", _stats(metrics["claim_token_lengths"])
+    )
     written.append(path)
 
-    path = tables_dir / "chars_per_abstract.csv"
+    path = tables_dir / "tokens_per_abstract.csv"
     _write_summary_csv(
-        path, "chars_per_abstract", _stats(metrics["abstract_char_lengths"])
+        path, "tokens_per_abstract", _stats(metrics["abstract_token_lengths"])
     )
     written.append(path)
 
@@ -180,60 +232,148 @@ def write_tables(metrics: dict[str, Any], tables_dir: Path) -> list[Path]:
     return written
 
 
+def _percentile_cap(values: list[float | int], q: float = 99.0) -> float | None:
+    """Upper display bound at percentile ``q``; None if empty."""
+    if not values:
+        return None
+    if len(values) == 1:
+        return float(values[0])
+    # quantiles(..., n=100) → cut points at 1%, 2%, …, 99%.
+    cuts = statistics.quantiles(values, n=100, method="inclusive")
+    idx = max(0, min(len(cuts) - 1, int(q) - 1))
+    return float(cuts[idx])
+
+
+def _clip_for_display(
+    values: list[float | int], *, q: float = 99.0
+) -> tuple[list[float | int], float | None, int]:
+    """Keep values ≤ Pq for plotting; return (clipped, cap, n_above)."""
+    cap = _percentile_cap(values, q=q)
+    if cap is None:
+        return [], None, 0
+    clipped = [v for v in values if v <= cap]
+    n_above = len(values) - len(clipped)
+    return clipped, cap, n_above
+
+
+def _clip_pairs_for_display(
+    pairs: list[tuple[float | int, float | int]],
+    *,
+    q: float = 99.0,
+) -> tuple[list[tuple[float | int, float | int]], str]:
+    """Clip both axes of 2D pairs to their respective Pq bounds."""
+    if not pairs:
+        return [], ""
+    xs = [p[0] for p in pairs]
+    ys = [p[1] for p in pairs]
+    x_cap = _percentile_cap(xs, q=q)
+    y_cap = _percentile_cap(ys, q=q)
+    assert x_cap is not None and y_cap is not None
+    clipped = [(x, y) for x, y in pairs if x <= x_cap and y <= y_cap]
+    n_out = len(pairs) - len(clipped)
+    note = (
+        f" (axes ≤ P{q:g}: x≤{x_cap:g}, y≤{y_cap:g}"
+        + (f"; {n_out} outside" if n_out else "")
+        + ")"
+    )
+    return clipped, note
+
+
+def _maybe_mark_bert_limit(ax: Any, *, xmax: float | None) -> None:
+    if xmax is not None and xmax >= BERT_MAX_POSITIONS:
+        ax.axvline(
+            BERT_MAX_POSITIONS,
+            color="#9b2226",
+            linestyle="--",
+            linewidth=1.2,
+            label=f"BERT max {BERT_MAX_POSITIONS}",
+        )
+        ax.legend(loc="upper right", fontsize=8)
+
+
 def write_plots(metrics: dict[str, Any], plots_dir: Path) -> list[Path]:
     plots_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
+    q = 99.0
+    tok_name = metrics.get("tokenizer_name", DEFAULT_TOKENIZER)
 
-    # 1) Claim char length histogram
+    # 1) Claim token length histogram
     fig, ax = plt.subplots(figsize=(8, 5))
-    lengths = metrics["claim_char_lengths"]
+    lengths, cap, n_above = _clip_for_display(metrics["claim_token_lengths"], q=q)
     if lengths:
-        ax.hist(lengths, bins=min(40, max(10, int(len(lengths) ** 0.5))), color="#3d5a80", edgecolor="white")
-    ax.set_xlabel("Characters per claim")
+        ax.hist(
+            lengths,
+            bins=min(40, max(10, int(len(lengths) ** 0.5))),
+            color="#3d5a80",
+            edgecolor="white",
+        )
+    ax.set_xlabel(f"BERT tokens per claim ({tok_name})")
     ax.set_ylabel("Count")
-    ax.set_title("Claim character length")
+    title = "Claim token length"
+    if cap is not None:
+        title += f" (≤ P{q:g}={cap:g}"
+        if n_above:
+            title += f"; {n_above} above omitted"
+        title += ")"
+    ax.set_title(title)
+    _maybe_mark_bert_limit(ax, xmax=cap)
     fig.tight_layout()
-    path = plots_dir / "hist_claim_char_length.png"
+    path = plots_dir / "hist_claim_token_length.png"
     fig.savefig(path, dpi=150)
     plt.close(fig)
     written.append(path)
 
-    # 2) Num claims per patent histogram
+    # 2) Num claims per patent histogram (exclude 0: dominates scale; P99-cap the rest)
     fig, ax = plt.subplots(figsize=(8, 5))
-    n_claims = metrics["claims_per_patent"]
-    if n_claims:
-        max_n = max(n_claims)
-        bins = range(0, max_n + 2)
+    n_claims_raw = [n for n in metrics["claims_per_patent"] if n > 0]
+    n_zero = len(metrics["claims_per_patent"]) - len(n_claims_raw)
+    n_claims, cap, n_above = _clip_for_display(n_claims_raw, q=q)
+    if n_claims and cap is not None:
+        bin_max = max(1, int(cap))
+        bins = range(1, bin_max + 2)
         ax.hist(n_claims, bins=bins, color="#ee6c4d", edgecolor="white", align="left")
+        ax.set_xlim(0.5, bin_max + 0.5)
     ax.set_xlabel("Number of claims (primary published document)")
     ax.set_ylabel("Number of patents")
-    ax.set_title("Claims per patent")
+    title = "Claims per patent"
+    bits: list[str] = []
+    if n_zero:
+        bits.append(f"{n_zero} with 0 claims omitted")
+    if cap is not None:
+        bits.append(f"≤ P{q:g}={cap:g}")
+        if n_above:
+            bits.append(f"{n_above} above omitted")
+    if bits:
+        title += " (" + "; ".join(bits) + ")"
+    ax.set_title(title)
     fig.tight_layout()
     path = plots_dir / "hist_num_claims_per_patent.png"
     fig.savefig(path, dpi=150)
     plt.close(fig)
     written.append(path)
 
-    # 3) 2D: mean claim char length vs num claims
+    # 3) 2D: mean claim tokens vs num claims
     fig, ax = plt.subplots(figsize=(8, 5))
-    pairs = metrics["claim_chars_vs_num"]
+    pairs, note = _clip_pairs_for_display(metrics["claim_tokens_vs_num"], q=q)
     if pairs:
         xs = [p[0] for p in pairs]
         ys = [p[1] for p in pairs]
         hb = ax.hexbin(xs, ys, gridsize=20, cmap="viridis", mincnt=1)
         fig.colorbar(hb, ax=ax, label="Patents")
     ax.set_xlabel("Number of claims")
-    ax.set_ylabel("Mean characters per claim")
-    ax.set_title("Claim length vs number of claims (per patent)")
+    ax.set_ylabel(f"Mean BERT tokens per claim ({tok_name})")
+    ax.set_title(f"Claim tokens vs number of claims (per patent){note}")
     fig.tight_layout()
-    path = plots_dir / "hist2d_claim_chars_vs_num_claims.png"
+    path = plots_dir / "hist2d_claim_tokens_vs_num_claims.png"
     fig.savefig(path, dpi=150)
     plt.close(fig)
     written.append(path)
 
-    # 4) Abstract char length histogram
+    # 4) Abstract token length histogram
     fig, ax = plt.subplots(figsize=(8, 5))
-    abs_lengths = metrics["abstract_char_lengths"]
+    abs_lengths, cap, n_above = _clip_for_display(
+        metrics["abstract_token_lengths"], q=q
+    )
     if abs_lengths:
         ax.hist(
             abs_lengths,
@@ -241,28 +381,35 @@ def write_plots(metrics: dict[str, Any], plots_dir: Path) -> list[Path]:
             color="#3d5a80",
             edgecolor="white",
         )
-    ax.set_xlabel("Characters per abstract")
+    ax.set_xlabel(f"BERT tokens per abstract ({tok_name})")
     ax.set_ylabel("Count")
-    ax.set_title("Abstract character length")
+    title = "Abstract token length"
+    if cap is not None:
+        title += f" (≤ P{q:g}={cap:g}"
+        if n_above:
+            title += f"; {n_above} above omitted"
+        title += ")"
+    ax.set_title(title)
+    _maybe_mark_bert_limit(ax, xmax=cap)
     fig.tight_layout()
-    path = plots_dir / "hist_abstract_char_length.png"
+    path = plots_dir / "hist_abstract_token_length.png"
     fig.savefig(path, dpi=150)
     plt.close(fig)
     written.append(path)
 
-    # 5) 2D: abstract char length vs num claims
+    # 5) 2D: abstract tokens vs num claims
     fig, ax = plt.subplots(figsize=(8, 5))
-    abs_pairs = metrics["abstract_chars_vs_num"]
+    abs_pairs, note = _clip_pairs_for_display(metrics["abstract_tokens_vs_num"], q=q)
     if abs_pairs:
         xs = [p[0] for p in abs_pairs]
         ys = [p[1] for p in abs_pairs]
         hb = ax.hexbin(xs, ys, gridsize=20, cmap="viridis", mincnt=1)
         fig.colorbar(hb, ax=ax, label="Patents")
     ax.set_xlabel("Number of claims")
-    ax.set_ylabel("Characters per abstract")
-    ax.set_title("Abstract length vs number of claims (per patent)")
+    ax.set_ylabel(f"BERT tokens per abstract ({tok_name})")
+    ax.set_title(f"Abstract tokens vs number of claims (per patent){note}")
     fig.tight_layout()
-    path = plots_dir / "hist2d_abstract_chars_vs_num_claims.png"
+    path = plots_dir / "hist2d_abstract_tokens_vs_num_claims.png"
     fig.savefig(path, dpi=150)
     plt.close(fig)
     written.append(path)
@@ -316,6 +463,11 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Plot output dir (default: {DEFAULT_PLOTS})",
     )
     p.add_argument(
+        "--tokenizer",
+        default=DEFAULT_TOKENIZER,
+        help=f"Hugging Face tokenizer name (default: {DEFAULT_TOKENIZER})",
+    )
+    p.add_argument(
         "--tables-only",
         action="store_true",
         help="Write CSVs only (skip plots)",
@@ -340,12 +492,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: input_dir does not exist: {input_dir}", file=sys.stderr)
         return 1
 
-    metrics = collect_metrics(input_dir)
+    print(f"loading tokenizer={args.tokenizer}")
+    tokenizer = _load_tokenizer(args.tokenizer)
+    metrics = collect_metrics(input_dir, tokenizer)
     print(
         f"patents={metrics['n_patents']} "
         f"with_claims={metrics['n_with_primary_claims']} "
         f"with_abstract={metrics['n_with_primary_abstract']} "
-        f"ipc_labels={len(metrics['ipc_counts'])}"
+        f"ipc_labels={len(metrics['ipc_counts'])} "
+        f"tokenizer={metrics['tokenizer_name']}"
     )
 
     if not args.plots_only:
