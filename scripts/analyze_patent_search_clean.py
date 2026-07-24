@@ -100,6 +100,8 @@ def collect_metrics(input_dir: Path) -> dict[str, Any]:
     claims_per_patent: list[int] = []
     # Per patent: (num_claims, mean_claim_chars) for 2D hist; skip if no claims
     claim_chars_vs_num: list[tuple[int, float]] = []
+    # Per patent: (num_claims, abstract_chars) when abstract is non-empty
+    abstract_chars_vs_num: list[tuple[int, int]] = []
     ipc_counts: Counter[str] = Counter()
     n_patents = 0
     n_with_primary_claims = 0
@@ -134,7 +136,9 @@ def collect_metrics(input_dir: Path) -> dict[str, Any]:
         abstract = abstract.strip()
         if abstract:
             n_with_primary_abstract += 1
-            abstract_char_lengths.append(len(abstract))
+            abstract_len = len(abstract)
+            abstract_char_lengths.append(abstract_len)
+            abstract_chars_vs_num.append((n_claims, abstract_len))
 
     return {
         "n_patents": n_patents,
@@ -144,6 +148,7 @@ def collect_metrics(input_dir: Path) -> dict[str, Any]:
         "abstract_char_lengths": abstract_char_lengths,
         "claims_per_patent": claims_per_patent,
         "claim_chars_vs_num": claim_chars_vs_num,
+        "abstract_chars_vs_num": abstract_chars_vs_num,
         "ipc_counts": ipc_counts,
     }
 
@@ -226,7 +231,43 @@ def write_plots(metrics: dict[str, Any], plots_dir: Path) -> list[Path]:
     plt.close(fig)
     written.append(path)
 
-    # 4) IPC label vs patent count (top 40 for readability)
+    # 4) Abstract char length histogram
+    fig, ax = plt.subplots(figsize=(8, 5))
+    abs_lengths = metrics["abstract_char_lengths"]
+    if abs_lengths:
+        ax.hist(
+            abs_lengths,
+            bins=min(40, max(10, int(len(abs_lengths) ** 0.5))),
+            color="#3d5a80",
+            edgecolor="white",
+        )
+    ax.set_xlabel("Characters per abstract")
+    ax.set_ylabel("Count")
+    ax.set_title("Abstract character length")
+    fig.tight_layout()
+    path = plots_dir / "hist_abstract_char_length.png"
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    written.append(path)
+
+    # 5) 2D: abstract char length vs num claims
+    fig, ax = plt.subplots(figsize=(8, 5))
+    abs_pairs = metrics["abstract_chars_vs_num"]
+    if abs_pairs:
+        xs = [p[0] for p in abs_pairs]
+        ys = [p[1] for p in abs_pairs]
+        hb = ax.hexbin(xs, ys, gridsize=20, cmap="viridis", mincnt=1)
+        fig.colorbar(hb, ax=ax, label="Patents")
+    ax.set_xlabel("Number of claims")
+    ax.set_ylabel("Characters per abstract")
+    ax.set_title("Abstract length vs number of claims (per patent)")
+    fig.tight_layout()
+    path = plots_dir / "hist2d_abstract_chars_vs_num_claims.png"
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    written.append(path)
+
+    # 6) IPC label vs patent count (top 40 for readability)
     fig, ax = plt.subplots(figsize=(12, 6))
     counts: Counter[str] = metrics["ipc_counts"]
     top = counts.most_common(40)

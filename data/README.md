@@ -85,4 +85,6 @@ From `patent_search_clean` (primary published document per patent: prefer B* ove
 | `plots/hist_claim_char_length.png` | Claim length histogram |
 | `plots/hist_num_claims_per_patent.png` | Claims-per-patent histogram |
 | `plots/hist2d_claim_chars_vs_num_claims.png` | Mean claim chars vs num claims |
+| `plots/hist_abstract_char_length.png` | Abstract length histogram |
+| `plots/hist2d_abstract_chars_vs_num_claims.png` | Abstract chars vs num claims |
 | `plots/ipc_label_patent_counts.png` | Top IPC labels by patent count |
