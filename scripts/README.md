@@ -25,6 +25,7 @@ pip install -r classification/requirements-patentbert.txt
 python scripts/download_patentbert.py
 python scripts/run_patentbert.py --max-predictions 5
 python scripts/run_patentbert.py
+python scripts/run_patentbert.py --gzip
 ```
 
 ### Export text CSVs for classification
@@ -35,13 +36,16 @@ python scripts/export_patent_text_csvs.py --max-records 1000
 
 # Full corpus
 python scripts/export_patent_text_csvs.py
+
+# Gzip-compressed CSVs (*.csv.gz)
+python scripts/export_patent_text_csvs.py --gzip
 ```
 
 Writes from the primary published document:
 
-- `abstracts.csv` — 1 row/app
-- `first_claims.csv` — 1 row/app (first claim only)
-- `claims.csv` — 1 row/claim
+- `abstracts.csv` / `.csv.gz` — 1 row/app
+- `first_claims.csv` / `.csv.gz` — 1 row/app (first claim only)
+- `claims.csv` / `.csv.gz` — 1 row/claim
 
 ### Pack legacy per-file JSON
 

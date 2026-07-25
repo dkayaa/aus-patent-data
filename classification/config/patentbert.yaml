@@ -1,7 +1,7 @@
 # PatentBERT CPC-subclass multi-label inference (claim-level).
 
 paths:
-  claims_csv: data/interim/patent_search_text/first_claims.csv
+  claims_csv: data/interim/patent_search_text/first_claims.csv.gz
   # Absolute or repo-relative. Checkpoint + labels + vocab/config (gitignored).
   model_dir: classification/models/patentbert
   # Absolute or repo-relative. Prepared TSV, row map, predictions.
@@ -17,3 +17,5 @@ infer:
   # Must exist in labels_group_id.tsv. null = first data row (skips id/title header).
   placeholder_group_id: A01B
   do_lower_case: true
+  # Write row_map / predictions / predict_result / input as *.gz (CLI --gzip overrides).
+  gzip: false

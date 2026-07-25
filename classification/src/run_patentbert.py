@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Prepare claims.csv, run PatentBERT claim-level inference, write predictions.csv."""
+"""Prepare claims.csv, run PatentBERT claim-level inference, write predictions.csv[.gz]."""
 
 from __future__ import annotations
 
 import argparse
 import csv
+import gzip
 import os
 import re
+import shutil
 import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 import yaml
 
@@ -23,6 +25,12 @@ CHECKPOINT_PREFIX = "model.ckpt-181172"
 
 # predict_result.txt lines: "LABEL (0.85), LABEL2 (0.42)"
 _PRED_TOKEN_RE = re.compile(r"^\s*(.+?)\s+\(([0-9]*\.?[0-9]+)\)\s*$")
+
+# Patent claims can exceed the default 128 KiB csv field limit.
+try:
+    csv.field_size_limit(sys.maxsize)
+except OverflowError:
+    csv.field_size_limit(2**31 - 1)
 
 
 def _resolve_path(p: str | Path) -> Path:
@@ -60,25 +68,47 @@ def _sanitize_tsv_field(value: str) -> str:
     )
 
 
+def _open_text_read(path: Path) -> TextIO:
+    if path.suffix == ".gz" or path.name.endswith(".csv.gz") or path.name.endswith(".tsv.gz"):
+        return gzip.open(path, "rt", encoding="utf-8", newline="")
+    return path.open("r", encoding="utf-8", newline="")
+
+
+def _open_text_write(path: Path) -> TextIO:
+    if path.suffix == ".gz" or str(path).endswith(".csv.gz") or str(path).endswith(".tsv.gz") or str(path).endswith(".txt.gz"):
+        return gzip.open(path, "wt", encoding="utf-8", newline="")
+    return path.open("w", encoding="utf-8", newline="")
+
+
+def _gzip_replace(path: Path) -> Path:
+    """Gzip ``path`` → ``path.gz`` and remove the uncompressed file."""
+    gz_path = Path(str(path) + ".gz")
+    with path.open("rb") as src, gzip.open(gz_path, "wb") as dst:
+        shutil.copyfileobj(src, dst)
+    path.unlink()
+    return gz_path
+
+
 def prepare_input_tsv(
     claims_csv: Path,
     output_dir: Path,
     *,
     placeholder_group_id: str,
     max_predictions: int | None,
+    use_gzip: bool = False,
 ) -> tuple[Path, Path, int]:
-    """Write input.tsv + row_map.csv; one row per claims.csv record."""
+    """Write input.tsv (plain; TF1 needs it) + row_map.csv[.gz]."""
     output_dir.mkdir(parents=True, exist_ok=True)
     input_tsv = output_dir / "input.tsv"
-    row_map_path = output_dir / "row_map.csv"
+    row_map_path = output_dir / ("row_map.csv.gz" if use_gzip else "row_map.csv")
 
     claim_seq_by_app: dict[str, int] = defaultdict(int)
     n_rows = 0
     placeholder = _sanitize_tsv_field(placeholder_group_id)
 
-    with claims_csv.open(encoding="utf-8", newline="") as inf, input_tsv.open(
+    with _open_text_read(claims_csv) as inf, input_tsv.open(
         "w", encoding="utf-8", newline="\n"
-    ) as tsv_f, row_map_path.open("w", encoding="utf-8", newline="") as map_f:
+    ) as tsv_f, _open_text_write(row_map_path) as map_f:
         reader = csv.DictReader(inf)
         required = {"application_number", "claim"}
         if reader.fieldnames is None or not required.issubset(set(reader.fieldnames)):
@@ -146,15 +176,16 @@ def write_predictions_csv(
     pred_result_path: Path,
     predictions_csv: Path,
 ) -> int:
-    with row_map_path.open(encoding="utf-8", newline="") as map_f:
+    with _open_text_read(row_map_path) as map_f:
         row_map = list(csv.DictReader(map_f))
 
     pred_lines: list[str] = []
     if pred_result_path.is_file():
-        pred_lines = pred_result_path.read_text(encoding="utf-8").splitlines()
+        with _open_text_read(pred_result_path) as pred_f:
+            pred_lines = pred_f.read().splitlines()
 
     n = min(len(row_map), len(pred_lines))
-    with predictions_csv.open("w", encoding="utf-8", newline="") as out_f:
+    with _open_text_write(predictions_csv) as out_f:
         writer = csv.DictWriter(
             out_f,
             fieldnames=[
@@ -303,7 +334,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--prepare-only",
         action="store_true",
-        help="Write input.tsv + row_map.csv and exit (no TF1 inference)",
+        help="Write input.tsv + row_map.csv[.gz] and exit (no TF1 inference)",
+    )
+    parser.add_argument(
+        "--gzip",
+        action="store_true",
+        help=(
+            "Write compressed outputs: row_map.csv.gz, predictions.csv.gz, "
+            "predict_result.txt.gz, input.tsv.gz (input.tsv stays plain until after TF1)"
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -320,6 +359,7 @@ def main(argv: list[str] | None = None) -> int:
     output_dir = _resolve_path(
         args.output_dir or paths.get("output_dir") or "data/interim/patentbert"
     )
+    use_gzip = bool(args.gzip or infer.get("gzip", False))
 
     max_predictions = args.max_predictions
     if max_predictions is None:
@@ -358,12 +398,17 @@ def main(argv: list[str] | None = None) -> int:
         output_dir,
         placeholder_group_id=placeholder_group_id,
         max_predictions=max_predictions,
+        use_gzip=use_gzip,
     )
-    print(f"Prepared {n_rows} claim rows → {input_tsv}")
+    print(f"Prepared {n_rows} claim rows → {input_tsv} (+ {row_map_path.name})")
 
     if args.prepare_only:
+        if use_gzip and input_tsv.is_file():
+            gz = _gzip_replace(input_tsv)
+            print(f"Compressed → {gz}")
         return 0
 
+    # TF1 classifier writes a plain text file only.
     pred_result = output_dir / "predict_result.txt"
     # Input TSV already truncated when max_predictions set; pass -1 to classify all rows.
     rc = run_classifier(
@@ -378,9 +423,20 @@ def main(argv: list[str] | None = None) -> int:
     if rc != 0:
         return rc
 
-    predictions_csv = output_dir / "predictions.csv"
+    predictions_csv = output_dir / (
+        "predictions.csv.gz" if use_gzip else "predictions.csv"
+    )
     n_written = write_predictions_csv(row_map_path, pred_result, predictions_csv)
     print(f"Wrote {n_written} predictions → {predictions_csv}")
+
+    if use_gzip:
+        if pred_result.is_file():
+            gz_pred = _gzip_replace(pred_result)
+            print(f"Compressed → {gz_pred}")
+        if input_tsv.is_file():
+            gz_tsv = _gzip_replace(input_tsv)
+            print(f"Compressed → {gz_tsv}")
+
     return 0
 
 

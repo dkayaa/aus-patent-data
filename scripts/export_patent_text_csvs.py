@@ -3,21 +3,25 @@
 
 Writes three files from the primary published document (prefer B* over A*):
 
-- abstracts.csv: one row per application
+- abstracts.csv[.gz]: one row per application
   ``application_number,invention_title,abstract``
-- first_claims.csv: one row per application (first claim only)
+- first_claims.csv[.gz]: one row per application (first claim only)
   ``application_number,invention_title,claim``
-- claims.csv: one row per claim
+- claims.csv[.gz]: one row per claim
   ``application_number,invention_title,claim``
+
+Pass ``--gzip`` to write ``*.csv.gz`` instead of plain ``*.csv``.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import gzip
 import sys
+from contextlib import ExitStack
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, TextIO
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "scrape" / "src"))
@@ -75,16 +79,32 @@ def _iter_limited_records(
             break
 
 
+def _csv_paths(output_dir: Path, *, use_gzip: bool) -> tuple[Path, Path, Path]:
+    suffix = ".csv.gz" if use_gzip else ".csv"
+    return (
+        output_dir / f"abstracts{suffix}",
+        output_dir / f"first_claims{suffix}",
+        output_dir / f"claims{suffix}",
+    )
+
+
+def _open_text_write(path: Path, *, use_gzip: bool) -> TextIO:
+    if use_gzip:
+        return gzip.open(path, "wt", encoding="utf-8", newline="")
+    return path.open("w", encoding="utf-8", newline="")
+
+
 def export_text_csvs(
     input_dir: Path,
     output_dir: Path,
     *,
     max_records: int | None = None,
-) -> dict[str, int]:
+    use_gzip: bool = False,
+) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    abstracts_path = output_dir / "abstracts.csv"
-    first_claims_path = output_dir / "first_claims.csv"
-    claims_path = output_dir / "claims.csv"
+    abstracts_path, first_claims_path, claims_path = _csv_paths(
+        output_dir, use_gzip=use_gzip
+    )
 
     n_apps = 0
     n_abstract_rows = 0
@@ -93,11 +113,15 @@ def export_text_csvs(
     n_without_primary = 0
     n_without_first_claim = 0
 
-    with (
-        abstracts_path.open("w", encoding="utf-8", newline="") as abstracts_f,
-        first_claims_path.open("w", encoding="utf-8", newline="") as first_claims_f,
-        claims_path.open("w", encoding="utf-8", newline="") as claims_f,
-    ):
+    with ExitStack() as stack:
+        abstracts_f = stack.enter_context(
+            _open_text_write(abstracts_path, use_gzip=use_gzip)
+        )
+        first_claims_f = stack.enter_context(
+            _open_text_write(first_claims_path, use_gzip=use_gzip)
+        )
+        claims_f = stack.enter_context(_open_text_write(claims_path, use_gzip=use_gzip))
+
         abstracts_writer = csv.DictWriter(
             abstracts_f,
             fieldnames=["application_number", "invention_title", "abstract"],
@@ -190,6 +214,9 @@ def export_text_csvs(
         "claim_rows": n_claim_rows,
         "without_primary_doc": n_without_primary,
         "without_first_claim": n_without_first_claim,
+        "abstracts_path": str(abstracts_path),
+        "first_claims_path": str(first_claims_path),
+        "claims_path": str(claims_path),
     }
 
 
@@ -209,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=DEFAULT_OUTPUT,
         help=(
-            "directory for abstracts.csv, first_claims.csv, and claims.csv "
+            "directory for abstracts / first_claims / claims CSV "
             f"(default: {DEFAULT_OUTPUT})"
         ),
     )
@@ -218,6 +245,11 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=None,
         help="max applications to export (default: all)",
+    )
+    parser.add_argument(
+        "--gzip",
+        action="store_true",
+        help="write abstracts.csv.gz, first_claims.csv.gz, claims.csv.gz",
     )
     args = parser.parse_args(argv)
 
@@ -239,11 +271,12 @@ def main(argv: list[str] | None = None) -> int:
         input_dir,
         output_dir,
         max_records=args.max_records,
+        use_gzip=args.gzip,
     )
     print(
-        f"wrote {output_dir / 'abstracts.csv'} ({stats['abstract_rows']} rows), "
-        f"{output_dir / 'first_claims.csv'} ({stats['first_claim_rows']} rows), "
-        f"{output_dir / 'claims.csv'} ({stats['claim_rows']} rows) "
+        f"wrote {stats['abstracts_path']} ({stats['abstract_rows']} rows), "
+        f"{stats['first_claims_path']} ({stats['first_claim_rows']} rows), "
+        f"{stats['claims_path']} ({stats['claim_rows']} rows) "
         f"from {stats['applications']} applications"
         + (
             f" ({stats['without_primary_doc']} without primary doc, "
