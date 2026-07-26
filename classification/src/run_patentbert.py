@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Prepare claims.csv, run PatentBERT claim-level inference, write predictions.csv[.gz]."""
+"""Stream claims CSV in chunks, run PatentBERT per chunk, append predictions.
+
+The upstream TF1 classifier loads its TSV entirely into memory. For large corpora
+(~500k rows) this script never feeds it more than ``chunk_size`` rows at a time.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +17,7 @@ import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, Iterator, TextIO
 
 import yaml
 
@@ -22,6 +26,15 @@ DEFAULT_CONFIG = REPO_ROOT / "classification" / "config" / "patentbert.yaml"
 PATENTBERT_DIR = Path(__file__).resolve().parent / "patentbert"
 CLASSIFIER = PATENTBERT_DIR / "patent_classifier.py"
 CHECKPOINT_PREFIX = "model.ckpt-181172"
+DEFAULT_CHUNK_SIZE = 1000
+PRED_FIELDS = [
+    "application_number",
+    "claim_seq",
+    "id",
+    "predicted_group_ids",
+    "predicted_scores",
+]
+ROW_MAP_FIELDS = ["row_index", "application_number", "claim_seq", "id"]
 
 # predict_result.txt lines: "LABEL (0.85), LABEL2 (0.42)"
 _PRED_TOKEN_RE = re.compile(r"^\s*(.+?)\s+\(([0-9]*\.?[0-9]+)\)\s*$")
@@ -74,12 +87,6 @@ def _open_text_read(path: Path) -> TextIO:
     return path.open("r", encoding="utf-8", newline="")
 
 
-def _open_text_write(path: Path) -> TextIO:
-    if path.suffix == ".gz" or str(path).endswith(".csv.gz") or str(path).endswith(".tsv.gz") or str(path).endswith(".txt.gz"):
-        return gzip.open(path, "wt", encoding="utf-8", newline="")
-    return path.open("w", encoding="utf-8", newline="")
-
-
 def _gzip_replace(path: Path) -> Path:
     """Gzip ``path`` → ``path.gz`` and remove the uncompressed file."""
     gz_path = Path(str(path) + ".gz")
@@ -87,73 +94,6 @@ def _gzip_replace(path: Path) -> Path:
         shutil.copyfileobj(src, dst)
     path.unlink()
     return gz_path
-
-
-def prepare_input_tsv(
-    claims_csv: Path,
-    output_dir: Path,
-    *,
-    placeholder_group_id: str,
-    max_predictions: int | None,
-    use_gzip: bool = False,
-) -> tuple[Path, Path, int]:
-    """Write input.tsv (plain; TF1 needs it) + row_map.csv[.gz]."""
-    output_dir.mkdir(parents=True, exist_ok=True)
-    input_tsv = output_dir / "input.tsv"
-    row_map_path = output_dir / ("row_map.csv.gz" if use_gzip else "row_map.csv")
-
-    claim_seq_by_app: dict[str, int] = defaultdict(int)
-    n_rows = 0
-    placeholder = _sanitize_tsv_field(placeholder_group_id)
-
-    with _open_text_read(claims_csv) as inf, input_tsv.open(
-        "w", encoding="utf-8", newline="\n"
-    ) as tsv_f, _open_text_write(row_map_path) as map_f:
-        reader = csv.DictReader(inf)
-        required = {"application_number", "claim"}
-        if reader.fieldnames is None or not required.issubset(set(reader.fieldnames)):
-            raise RuntimeError(
-                f"{claims_csv} must have columns application_number, claim; "
-                f"got {reader.fieldnames}"
-            )
-
-        # Manual TSV: patent_classifier uses csv.reader(..., quotechar=None).
-        tsv_f.write("group_ids\tid\tdate\ttext\n")
-
-        map_w = csv.DictWriter(
-            map_f,
-            fieldnames=["row_index", "application_number", "claim_seq", "id"],
-        )
-        map_w.writeheader()
-
-        for row in reader:
-            if max_predictions is not None and n_rows >= max_predictions:
-                break
-            app_no = (row.get("application_number") or "").strip()
-            text = (row.get("claim") or "").strip()
-            if not app_no or not text:
-                continue
-
-            claim_seq_by_app[app_no] += 1
-            claim_seq = claim_seq_by_app[app_no]
-            row_id = f"{app_no}__{claim_seq}"
-            text_flat = _sanitize_tsv_field(text)
-
-            tsv_f.write(f"{placeholder}\t{row_id}\t1970-01-01\t{text_flat}\n")
-            map_w.writerow(
-                {
-                    "row_index": n_rows,
-                    "application_number": app_no,
-                    "claim_seq": claim_seq,
-                    "id": row_id,
-                }
-            )
-            n_rows += 1
-
-    if n_rows == 0:
-        raise RuntimeError(f"No claim rows written from {claims_csv}")
-
-    return input_tsv, row_map_path, n_rows
 
 
 def parse_pred_line(line: str) -> tuple[list[str], list[str]]:
@@ -171,43 +111,112 @@ def parse_pred_line(line: str) -> tuple[list[str], list[str]]:
     return labels, scores
 
 
-def write_predictions_csv(
-    row_map_path: Path,
-    pred_result_path: Path,
-    predictions_csv: Path,
-) -> int:
-    with _open_text_read(row_map_path) as map_f:
-        row_map = list(csv.DictReader(map_f))
-
-    pred_lines: list[str] = []
-    if pred_result_path.is_file():
-        with _open_text_read(pred_result_path) as pred_f:
-            pred_lines = pred_f.read().splitlines()
-
-    n = min(len(row_map), len(pred_lines))
-    with _open_text_write(predictions_csv) as out_f:
-        writer = csv.DictWriter(
-            out_f,
-            fieldnames=[
-                "application_number",
-                "claim_seq",
-                "id",
-                "predicted_group_ids",
-                "predicted_scores",
-            ],
-        )
-        writer.writeheader()
-        for i in range(n):
-            labels, scores = parse_pred_line(pred_lines[i])
-            writer.writerow(
-                {
-                    "application_number": row_map[i]["application_number"],
-                    "claim_seq": row_map[i]["claim_seq"],
-                    "id": row_map[i]["id"],
-                    "predicted_group_ids": ",".join(labels),
-                    "predicted_scores": ",".join(scores),
-                }
+def iter_claim_rows(
+    claims_csv: Path,
+    *,
+    max_predictions: int | None,
+) -> Iterator[dict[str, str]]:
+    """Yield claim dicts with application_number, claim_seq, id, text."""
+    claim_seq_by_app: dict[str, int] = defaultdict(int)
+    n_rows = 0
+    with _open_text_read(claims_csv) as inf:
+        reader = csv.DictReader(inf)
+        required = {"application_number", "claim"}
+        if reader.fieldnames is None or not required.issubset(set(reader.fieldnames)):
+            raise RuntimeError(
+                f"{claims_csv} must have columns application_number, claim; "
+                f"got {reader.fieldnames}"
             )
+        for row in reader:
+            if max_predictions is not None and n_rows >= max_predictions:
+                break
+            app_no = (row.get("application_number") or "").strip()
+            text = (row.get("claim") or "").strip()
+            if not app_no or not text:
+                continue
+            claim_seq_by_app[app_no] += 1
+            claim_seq = claim_seq_by_app[app_no]
+            yield {
+                "application_number": app_no,
+                "claim_seq": str(claim_seq),
+                "id": f"{app_no}__{claim_seq}",
+                "text": _sanitize_tsv_field(text),
+            }
+            n_rows += 1
+
+
+def iter_chunks(
+    rows: Iterator[dict[str, str]],
+    chunk_size: int,
+) -> Iterator[list[dict[str, str]]]:
+    chunk: list[dict[str, str]] = []
+    for row in rows:
+        chunk.append(row)
+        if len(chunk) >= chunk_size:
+            yield chunk
+            chunk = []
+    if chunk:
+        yield chunk
+
+
+def write_chunk_tsv(
+    chunk: list[dict[str, str]],
+    input_tsv: Path,
+    *,
+    placeholder_group_id: str,
+) -> None:
+    placeholder = _sanitize_tsv_field(placeholder_group_id)
+    with input_tsv.open("w", encoding="utf-8", newline="\n") as tsv_f:
+        tsv_f.write("group_ids\tid\tdate\ttext\n")
+        for row in chunk:
+            tsv_f.write(
+                f"{placeholder}\t{row['id']}\t1970-01-01\t{row['text']}\n"
+            )
+
+
+def append_row_map(
+    map_f: TextIO,
+    chunk: list[dict[str, str]],
+    *,
+    start_index: int,
+    write_header: bool,
+) -> None:
+    writer = csv.DictWriter(map_f, fieldnames=ROW_MAP_FIELDS)
+    if write_header:
+        writer.writeheader()
+    for i, row in enumerate(chunk):
+        writer.writerow(
+            {
+                "row_index": start_index + i,
+                "application_number": row["application_number"],
+                "claim_seq": row["claim_seq"],
+                "id": row["id"],
+            }
+        )
+
+
+def append_predictions(
+    pred_f: TextIO,
+    chunk: list[dict[str, str]],
+    pred_lines: list[str],
+    *,
+    write_header: bool,
+) -> int:
+    writer = csv.DictWriter(pred_f, fieldnames=PRED_FIELDS)
+    if write_header:
+        writer.writeheader()
+    n = min(len(chunk), len(pred_lines))
+    for i in range(n):
+        labels, scores = parse_pred_line(pred_lines[i])
+        writer.writerow(
+            {
+                "application_number": chunk[i]["application_number"],
+                "claim_seq": chunk[i]["claim_seq"],
+                "id": chunk[i]["id"],
+                "predicted_group_ids": ",".join(labels),
+                "predicted_scores": ",".join(scores),
+            }
+        )
     return n
 
 
@@ -251,7 +260,6 @@ def run_classifier(
     data_dir = test_file.parent
     test_basename = test_file.name
 
-    # Classifier defaults reuse_tf_record=True; always rebuild for current input.tsv.
     stale = model_dir / "predict.tf_record"
     if stale.is_file():
         stale.unlink()
@@ -274,7 +282,6 @@ def run_classifier(
         f"--do_lower_case={'True' if do_lower_case else 'False'}",
         "--reuse_tf_record=False",
     ]
-    print("command:", " ".join(cmd))
     return subprocess.call(cmd, env=env)
 
 
@@ -284,35 +291,174 @@ def os_environ_with_patentbert_path() -> dict[str, str]:
     return env
 
 
+def prepare_only_stream(
+    claims_csv: Path,
+    output_dir: Path,
+    *,
+    placeholder_group_id: str,
+    max_predictions: int | None,
+    chunk_size: int,
+    use_gzip: bool,
+) -> int:
+    """Stream-write full input.tsv + row_map (disk OK; TF is not invoked)."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    input_tsv = output_dir / "input.tsv"
+    row_map_path = output_dir / "row_map.csv"
+    placeholder = _sanitize_tsv_field(placeholder_group_id)
+    n_rows = 0
+    with input_tsv.open("w", encoding="utf-8", newline="\n") as tsv_f, row_map_path.open(
+        "w", encoding="utf-8", newline=""
+    ) as map_f:
+        tsv_f.write("group_ids\tid\tdate\ttext\n")
+        map_w = csv.DictWriter(map_f, fieldnames=ROW_MAP_FIELDS)
+        map_w.writeheader()
+        for chunk_idx, chunk in enumerate(
+            iter_chunks(
+                iter_claim_rows(claims_csv, max_predictions=max_predictions),
+                chunk_size,
+            ),
+            start=1,
+        ):
+            for row in chunk:
+                tsv_f.write(
+                    f"{placeholder}\t{row['id']}\t1970-01-01\t{row['text']}\n"
+                )
+                map_w.writerow(
+                    {
+                        "row_index": n_rows,
+                        "application_number": row["application_number"],
+                        "claim_seq": row["claim_seq"],
+                        "id": row["id"],
+                    }
+                )
+                n_rows += 1
+            print(f"prepare chunk {chunk_idx}: wrote {len(chunk)} rows (total {n_rows})")
+    if n_rows == 0:
+        raise RuntimeError(f"No claim rows written from {claims_csv}")
+    print(f"Prepared {n_rows} claim rows → {input_tsv} (+ {row_map_path.name})")
+    if use_gzip:
+        print(f"Compressed → {_gzip_replace(input_tsv)}")
+        print(f"Compressed → {_gzip_replace(row_map_path)}")
+    return n_rows
+
+
+def run_streaming_inference(
+    claims_csv: Path,
+    output_dir: Path,
+    model_dir: Path,
+    *,
+    placeholder_group_id: str,
+    max_predictions: int | None,
+    chunk_size: int,
+    multi_hot_threshold: float,
+    predict_batch_size: int,
+    do_lower_case: bool,
+    use_gzip: bool,
+) -> int:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    input_tsv = output_dir / "input.tsv"
+    chunk_pred = output_dir / "predict_result.chunk.txt"
+    row_map_path = output_dir / "row_map.csv"
+    predictions_path = output_dir / "predictions.csv"
+    pred_result_path = output_dir / "predict_result.txt"
+
+    # Fresh outputs each run.
+    for p in (row_map_path, predictions_path, pred_result_path, chunk_pred):
+        if p.is_file():
+            p.unlink()
+    for p in (
+        Path(str(row_map_path) + ".gz"),
+        Path(str(predictions_path) + ".gz"),
+        Path(str(pred_result_path) + ".gz"),
+        Path(str(input_tsv) + ".gz"),
+    ):
+        if p.is_file():
+            p.unlink()
+
+    total_rows = 0
+    total_written = 0
+    chunk_idx = 0
+
+    with row_map_path.open("w", encoding="utf-8", newline="") as map_f, predictions_path.open(
+        "w", encoding="utf-8", newline=""
+    ) as pred_f, pred_result_path.open("w", encoding="utf-8", newline="\n") as raw_f:
+        for chunk in iter_chunks(
+            iter_claim_rows(claims_csv, max_predictions=max_predictions),
+            chunk_size,
+        ):
+            chunk_idx += 1
+            start_index = total_rows
+            write_chunk_tsv(chunk, input_tsv, placeholder_group_id=placeholder_group_id)
+            append_row_map(
+                map_f,
+                chunk,
+                start_index=start_index,
+                write_header=(chunk_idx == 1),
+            )
+            map_f.flush()
+
+            print(
+                f"chunk {chunk_idx}: inferring {len(chunk)} rows "
+                f"(rows {start_index + 1}-{start_index + len(chunk)}; "
+                f"running total after = {start_index + len(chunk)})"
+            )
+            rc = run_classifier(
+                model_dir=model_dir,
+                test_file=input_tsv,
+                pred_result_file=chunk_pred,
+                multi_hot_threshold=multi_hot_threshold,
+                predict_batch_size=predict_batch_size,
+                number_of_predictions=-1,
+                do_lower_case=do_lower_case,
+            )
+            if rc != 0:
+                print(f"error: classifier failed on chunk {chunk_idx} (exit {rc})", file=sys.stderr)
+                return rc
+
+            pred_lines = chunk_pred.read_text(encoding="utf-8").splitlines()
+            n = append_predictions(
+                pred_f,
+                chunk,
+                pred_lines,
+                write_header=(chunk_idx == 1),
+            )
+            pred_f.flush()
+            for line in pred_lines[:n]:
+                raw_f.write(line.rstrip("\n") + "\n")
+            raw_f.flush()
+
+            total_rows += len(chunk)
+            total_written += n
+            print(
+                f"chunk {chunk_idx}: wrote {n}/{len(chunk)} predictions "
+                f"(completed {total_written} rows)"
+            )
+
+    if total_rows == 0:
+        raise RuntimeError(f"No claim rows from {claims_csv}")
+
+    if chunk_pred.is_file():
+        chunk_pred.unlink()
+    if input_tsv.is_file():
+        input_tsv.unlink()
+
+    print(f"Done: {total_written} predictions → {predictions_path}")
+    if use_gzip:
+        print(f"Compressed → {_gzip_replace(predictions_path)}")
+        print(f"Compressed → {_gzip_replace(pred_result_path)}")
+        print(f"Compressed → {_gzip_replace(row_map_path)}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=DEFAULT_CONFIG,
-        help="Path to patentbert.yaml",
-    )
-    parser.add_argument(
-        "--claims-csv",
-        type=Path,
-        default=None,
-        help="Override paths.claims_csv",
-    )
-    parser.add_argument(
-        "--model-dir",
-        type=Path,
-        default=None,
-        help="Override paths.model_dir",
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=None,
-        help="Override paths.output_dir",
-    )
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument("--claims-csv", type=Path, default=None)
+    parser.add_argument("--model-dir", type=Path, default=None)
+    parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument(
         "--max-predictions",
         type=int,
@@ -320,29 +466,22 @@ def main(argv: list[str] | None = None) -> int:
         help="Cap claim rows (overrides infer.number_of_predictions)",
     )
     parser.add_argument(
-        "--multi-hot-threshold",
-        type=float,
-        default=None,
-        help="Override infer.multi_hot_threshold",
-    )
-    parser.add_argument(
-        "--predict-batch-size",
+        "--chunk-size",
         type=int,
         default=None,
-        help="Override infer.predict_batch_size",
+        help=f"Rows per TF1 invoke (default: config or {DEFAULT_CHUNK_SIZE})",
     )
+    parser.add_argument("--multi-hot-threshold", type=float, default=None)
+    parser.add_argument("--predict-batch-size", type=int, default=None)
     parser.add_argument(
         "--prepare-only",
         action="store_true",
-        help="Write input.tsv + row_map.csv[.gz] and exit (no TF1 inference)",
+        help="Stream-write full input.tsv + row_map.csv and exit (no TF1)",
     )
     parser.add_argument(
         "--gzip",
         action="store_true",
-        help=(
-            "Write compressed outputs: row_map.csv.gz, predictions.csv.gz, "
-            "predict_result.txt.gz, input.tsv.gz (input.tsv stays plain until after TF1)"
-        ),
+        help="Gzip final outputs (predictions / predict_result / row_map)",
     )
     args = parser.parse_args(argv)
 
@@ -365,6 +504,12 @@ def main(argv: list[str] | None = None) -> int:
     if max_predictions is None:
         cfg_cap = infer.get("number_of_predictions")
         max_predictions = int(cfg_cap) if cfg_cap is not None else None
+
+    chunk_size = args.chunk_size
+    if chunk_size is None:
+        chunk_size = int(infer.get("chunk_size") or DEFAULT_CHUNK_SIZE)
+    if chunk_size < 1:
+        parser.error("--chunk-size must be >= 1")
 
     threshold = (
         float(args.multi_hot_threshold)
@@ -393,51 +538,29 @@ def main(argv: list[str] | None = None) -> int:
     if not claims_csv.is_file():
         sys.exit(f"Claims CSV not found: {claims_csv}")
 
-    input_tsv, row_map_path, n_rows = prepare_input_tsv(
-        claims_csv,
-        output_dir,
-        placeholder_group_id=placeholder_group_id,
-        max_predictions=max_predictions,
-        use_gzip=use_gzip,
-    )
-    print(f"Prepared {n_rows} claim rows → {input_tsv} (+ {row_map_path.name})")
-
     if args.prepare_only:
-        if use_gzip and input_tsv.is_file():
-            gz = _gzip_replace(input_tsv)
-            print(f"Compressed → {gz}")
+        prepare_only_stream(
+            claims_csv,
+            output_dir,
+            placeholder_group_id=placeholder_group_id,
+            max_predictions=max_predictions,
+            chunk_size=chunk_size,
+            use_gzip=use_gzip,
+        )
         return 0
 
-    # TF1 classifier writes a plain text file only.
-    pred_result = output_dir / "predict_result.txt"
-    # Input TSV already truncated when max_predictions set; pass -1 to classify all rows.
-    rc = run_classifier(
-        model_dir=model_dir,
-        test_file=input_tsv,
-        pred_result_file=pred_result,
+    return run_streaming_inference(
+        claims_csv,
+        output_dir,
+        model_dir,
+        placeholder_group_id=placeholder_group_id,
+        max_predictions=max_predictions,
+        chunk_size=chunk_size,
         multi_hot_threshold=threshold,
         predict_batch_size=batch_size,
-        number_of_predictions=-1,
         do_lower_case=do_lower_case,
+        use_gzip=use_gzip,
     )
-    if rc != 0:
-        return rc
-
-    predictions_csv = output_dir / (
-        "predictions.csv.gz" if use_gzip else "predictions.csv"
-    )
-    n_written = write_predictions_csv(row_map_path, pred_result, predictions_csv)
-    print(f"Wrote {n_written} predictions → {predictions_csv}")
-
-    if use_gzip:
-        if pred_result.is_file():
-            gz_pred = _gzip_replace(pred_result)
-            print(f"Compressed → {gz_pred}")
-        if input_tsv.is_file():
-            gz_tsv = _gzip_replace(input_tsv)
-            print(f"Compressed → {gz_tsv}")
-
-    return 0
 
 
 if __name__ == "__main__":

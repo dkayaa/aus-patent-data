@@ -24,7 +24,7 @@ On Apple Silicon / Python 3.13, `tensorflow==1.15.5` is unavailable via pip. Use
 pip install -r classification/requirements-patentbert.txt
 python scripts/download_patentbert.py
 python scripts/run_patentbert.py --max-predictions 5
-python scripts/run_patentbert.py
+python scripts/run_patentbert.py --gzip --chunk-size 1000   # stream TF1 in chunks
 python scripts/run_patentbert.py --gzip
 ```
 

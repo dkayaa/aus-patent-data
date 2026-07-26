@@ -27,7 +27,8 @@ Multi-label CPC-subclass inference from the released PatentBERT checkpoint (pape
 | Config | `config/patentbert.yaml` |
 | Modules | `src/download_patentbert.py`, `src/run_patentbert.py`, `src/patentbert/` (TF1) |
 | Checkpoint | `models/patentbert/` (`model.ckpt-181172*`, `labels_group_id.tsv`, `vocab.txt`, `bert_config.json`) |
-| Writes | `data/interim/patentbert/` — `input.tsv`, `row_map.csv`, `predict_result.txt`, `predictions.csv` (add `--gzip` / `infer.gzip: true` for `*.gz`) |
+| Writes | `data/interim/patentbert/` — `row_map.csv`, `predict_result.txt`, `predictions.csv` (add `--gzip` for `*.gz`) |
+| Streaming | Claims CSV is read row-by-row; TF1 sees at most `infer.chunk_size` rows per invoke (default `1000`) |
 
 **`multi_hot_threshold`** (default `0.3`): sigmoid probability cutoff. CPC subclasses with score `>` threshold are kept. Lower → more labels per claim; higher → fewer.
 
@@ -65,8 +66,8 @@ pip install -r classification/requirements-patentbert.txt
 
 python scripts/download_patentbert.py
 python scripts/run_patentbert.py --max-predictions 5
-python scripts/run_patentbert.py
-python scripts/run_patentbert.py --gzip   # predictions.csv.gz etc.
+python scripts/run_patentbert.py --gzip --chunk-size 1000
+python scripts/run_patentbert.py --gzip
 ```
 
 Prepare TSV only (works from root `.venv`; no TF1 needed):

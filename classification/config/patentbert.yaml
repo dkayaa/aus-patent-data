@@ -11,11 +11,13 @@ infer:
   # Sigmoid probability cutoff: keep CPC subclasses with score > threshold.
   # Default 0.3 matches the upstream PatentBERT notebook.
   multi_hot_threshold: 0.3
-  predict_batch_size: 8
+  predict_batch_size: 30
+  # Rows fed to TF1 per invoke (keeps RAM bounded; ~500k corpora need this).
+  chunk_size: 1000
   # Cap on claim rows this run (null = all). CLI --max-predictions overrides.
   number_of_predictions: null
   # Must exist in labels_group_id.tsv. null = first data row (skips id/title header).
   placeholder_group_id: A01B
   do_lower_case: true
-  # Write row_map / predictions / predict_result / input as *.gz (CLI --gzip overrides).
+  # Write row_map / predictions / predict_result as *.gz (CLI --gzip overrides).
   gzip: false
