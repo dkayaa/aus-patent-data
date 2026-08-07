@@ -67,7 +67,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run all tasks sequentially",
     )
-    p.add_argument("--limit", type=int, default=None, help="Max patents this run")
+    p.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Max successful records to write this run (skips do not count)",
+    )
     p.add_argument(
         "--provider",
         choices=("local", "openrouter"),
@@ -129,7 +134,10 @@ def run_task(
     n_ok = 0
     n_skip = 0
     n_err = 0
-    for patent in iter_patent_texts(patents_dir, limit=limit, skip_ids=done):
+    # Iterate without a hard patent cap; --limit means successful writes.
+    for patent in iter_patent_texts(patents_dir, limit=None, skip_ids=done):
+        if limit is not None and n_ok >= limit:
+            break
         try:
             record = task.generate(patent)
         except Exception as exc:  # noqa: BLE001 — continue batch on per-patent failures

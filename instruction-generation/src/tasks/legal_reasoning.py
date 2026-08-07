@@ -37,7 +37,9 @@ class LegalReasoningTask(Task):
         if self.ipc_lookup is None:
             return None
         entry = self.ipc_lookup.get(patent.primary_ipc)
-        if entry is None:
+        # Skip codes with only a short title / no WIPO definition text — the
+        # generator otherwise invents grounding and produces low-quality justifications.
+        if entry is None or not entry.definition_statement:
             return None
 
         user = USER_TEMPLATE.format(
