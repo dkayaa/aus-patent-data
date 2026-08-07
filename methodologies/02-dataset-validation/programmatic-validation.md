@@ -5,7 +5,7 @@
 Apply cheap, deterministic checks **and** lexical/semantic scores to seed instruction JSONL before LLM/human review. Hard-fail on schema/IPC errors and very low score floors; otherwise keep examples with scores attached for later stages.
 
 ## Scope
-All four tasks under `data/interim/instruction_generation/<task>/`.
+All three tasks under `data/interim/instruction_generation/<task>/`.
 
 ## Inputs
 Alpaca-style JSONL (`part-*.jsonl` / `.jsonl.gz`).
@@ -16,7 +16,7 @@ Alpaca-style JSONL (`part-*.jsonl` / `.jsonl.gz`).
 * Required keys: `task`, `application_number`, `instruction`, `input`, `output`, `meta`
 * Non-empty `instruction`, `input`, `output`
 
-### Legal reasoning — IPC regex
+### IPC reasoning — IPC regex
 ```text
 IPC_RE = ^[A-H][0-9]{2}[A-Z](?:[0-9]{1,4}/[0-9]{2,6})?$
 ```
@@ -29,16 +29,15 @@ Per record:
 4. Any other `IPC_RE` matches inside the justification body must equal the primary code (strict)
 
 ### Light task checks
-* **abstract_drafting / patent_drafting:** length sanity; claim 1 starts with `^\s*\d+\.`
+* **abstract_drafting:** length sanity vs input
 * **mrc:** instruction contains `?`; answer shorter than claims
 
 ## Lexical scores
 
 | Task | Metric | Pair |
 |------|--------|------|
-| `legal_reasoning` | ROUGE-L F1 | Justification body vs `input` |
+| `ipc_reasoning` | ROUGE-L F1 | Justification body vs `input` |
 | `abstract_drafting` | ROUGE-L F1 | abstract (`output`) vs claims (`input`) |
-| `patent_drafting` | ROUGE-L F1 | claim 1 (`output`) vs abstract (`input`) |
 | `mrc` | Token-F1 + answer **containment** in claims | answer vs claims |
 
 Also record: `len_input_tokens`, `len_output_tokens`, `compression_ratio = len_out / len_in`.
@@ -49,9 +48,8 @@ Library: `rouge-score` (ROUGE-L F1).
 
 | Task | Pair |
 |------|------|
-| `legal_reasoning` | Justification vs `input` |
+| `ipc_reasoning` | Justification vs `input` |
 | `abstract_drafting` | abstract vs claims |
-| `patent_drafting` | claim 1 vs abstract |
 | `mrc` | answer vs claims |
 
 * **Model:** `sentence-transformers/all-MiniLM-L6-v2`
@@ -61,7 +59,7 @@ Library: `rouge-score` (ROUGE-L F1).
 ## Soft floors (quarantine)
 Fail only if:
 * semantic cosine `< 0.15`, or
-* ROUGE-L F1 `< 0.02` (legal / drafting), or
+* ROUGE-L F1 `< 0.02` (IPC reasoning / abstract drafting), or
 * MRC: answer not contained **and** token-F1 `< 0.1`
 
 Borderline scores remain in the pass set with `meta.validation` filled in.

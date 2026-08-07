@@ -2,7 +2,7 @@
 ---
 
 ## Objective
-Use a frontier model as an automated grader over seed instruction examples for all four tasks (legal reasoning, abstract drafting, patent drafting, MRC), producing scalable quality scores and short rationales before human audit.
+Use a frontier model as an automated grader over seed instruction examples for all three tasks (IPC reasoning, abstract drafting, MRC), producing scalable quality scores and short rationales before human audit.
 
 ## Citation
 This mode follows the **LLM-as-a-judge** paradigm established by:
@@ -21,7 +21,7 @@ Optional complementary rubric style: Liu et al., *G-Eval* (EMNLP 2023) — step-
 
 ```bash
 set -a && source .env && set +a
-.venv/bin/python scripts/judge_instruction_data.py --task legal_reasoning
+.venv/bin/python scripts/judge_instruction_data.py --task ipc_reasoning
 .venv/bin/python scripts/judge_instruction_data.py --all --limit 50
 ```
 
@@ -36,12 +36,11 @@ Implementation: `dataset-validation/` (`config/llm_judge.yaml`, `src/run_llm_jud
 
 | Task | High score means |
 |------|------------------|
-| **legal_reasoning** | Treat `primary_ipc` / Classification as gold — do not re-classify. Justification maps claims to that fixed place; no invented codes; not boilerplate |
+| **ipc_reasoning** | Treat `primary_ipc` / Classification as gold — do not re-classify. Justification maps claims to that fixed place; no invented codes; not boilerplate |
 | **abstract_drafting** | Gold abstract is a fair compression of claims (judge checks *pair* coherence: instruction asks for abstract, input=claims, output=abstract); no obvious claim–abstract mismatch |
-| **patent_drafting** | Claim 1 is a plausible independent claim for the abstract; formal claim style; not off-topic |
 | **mrc** | Question is answerable **only** from the claims; answer is extractive/verbatim-supported; no hallucination |
 
-For drafting tasks the “output” is gold patent text — the judge mainly flags **misaligned triples** (bad instruction, truncated input, wrong field pairing), not “is this abstract well written by an LLM.”
+For abstract drafting the “output” is gold patent text — the judge mainly flags **misaligned triples** (bad instruction, truncated input, wrong field pairing), not “is this abstract well written by an LLM.”
 
 ## Bias mitigations (from Zheng et al.)
 * Fixed rubric + forced JSON (reduce verbosity gaming).
@@ -55,4 +54,4 @@ For drafting tasks the “output” is gold patent text — the judge mainly fla
 * Optional quarantine of `pass: false`
 
 ## Implementation note
-Runnable code lives under `dataset-validation/` and reuses `instruction-generation/src/llm.py` (`LLMClient`, `chat_json`, OpenRouter). Rubrics in `judge_prompts.py` strip generator `meta.model` / provider from the judge-visible payload; legal keeps `primary_ipc` / `ipc_title`.
+Runnable code lives under `dataset-validation/` and reuses `instruction-generation/src/llm.py` (`LLMClient`, `chat_json`, OpenRouter). Rubrics in `judge_prompts.py` strip generator `meta.model` / provider from the judge-visible payload; IPC reasoning keeps `primary_ipc` / `ipc_title`.

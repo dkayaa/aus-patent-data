@@ -1,4 +1,4 @@
-"""Task 4: Machine reading comprehension (extractive QA over claims)."""
+"""Task 3: Machine reading comprehension (extractive QA over claims)."""
 
 from __future__ import annotations
 

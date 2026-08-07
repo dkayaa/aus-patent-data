@@ -14,8 +14,6 @@ REQUIRED_KEYS = (
     "meta",
 )
 
-_CLAIM1_RE = re.compile(r"^\s*\d+\.")
-
 
 def check_schema(record: dict[str, Any], *, expected_task: str | None = None) -> list[str]:
     failures: list[str] = []
@@ -49,11 +47,9 @@ def check_task_light(record: dict[str, Any]) -> list[str]:
     instruction = str(record.get("instruction") or "")
     input_text = str(record.get("input") or "")
 
-    if task in {"abstract_drafting", "patent_drafting"}:
+    if task == "abstract_drafting":
         if len(output) > max(len(input_text) * 2, 50_000):
             failures.append("output_too_long_vs_input")
-        if task == "patent_drafting" and not _CLAIM1_RE.match(output):
-            failures.append("claim1_missing_number_prefix")
 
     if task == "mrc":
         if "?" not in instruction:

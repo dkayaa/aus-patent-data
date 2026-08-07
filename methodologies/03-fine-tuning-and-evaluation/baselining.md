@@ -19,9 +19,9 @@ One frontier chat model via OpenRouter (or equivalent), evaluated only as an **u
 
 ### 4. Task-specific published or domain baselines (where they exist)
 Use when a clear, citable system maps onto a task:
-* **legal_reasoning / IPC-like labeling:** PatentBERT (or similar CPC/IPC classifiers already used in `classification/`) as a **classification-only** baseline on primary IPC / subclass — not a free-text justification baseline.
+* **ipc_reasoning / IPC-like labeling:** PatentBERT (or similar CPC/IPC classifiers already used in `classification/`) as a **classification-only** baseline on primary IPC / subclass — not a free-text justification baseline.
 * **MRC-style extractive QA:** report classic extractive metrics against any off-the-shelf open MRC model only if inputs can be aligned fairly; otherwise omit rather than force a mismatch.
-* **Drafting tasks:** typically no single public AU-claims↔abstract model; rely on untuned + frontier references plus automatic metrics.
+* **Abstract drafting:** typically no single public AU-claims↔abstract model; rely on untuned + frontier references plus automatic metrics.
 
 Document each baseline’s license, access date, and exact model ID.
 
@@ -29,7 +29,7 @@ Document each baseline’s license, access date, and exact model ID.
 * Identical test manifests (`application_number` + `task`).
 * Identical generation hyperparameters for generative baselines of the same size class.
 * No access to gold `output` except for few-shot exemplars from train.
-* For legal reasoning, baselines that only emit a code are scored on **code accuracy**; free-text justification metrics apply only when a justification is produced.
+* For IPC reasoning, baselines that only emit a code are scored on **code accuracy**; free-text justification metrics apply only when a justification is produced.
 
 ## What to report per baseline
 * Model / method name and size (or API tier)

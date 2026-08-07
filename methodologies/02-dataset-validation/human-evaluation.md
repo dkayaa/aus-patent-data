@@ -8,8 +8,8 @@ Obtain a small, trustworthy labeled slice to (a) estimate true seed-data quality
 Full double-annotation of thousands of long patent examples is unrealistic. Prefer a **stratified audit** plus clear rubrics.
 
 ### Sample
-* **Size:** ~100–200 examples total, stratified across the four tasks (e.g. 25–50 each), drawn from the programmatically filtered set.
-* **Stratify further within task** when possible: IPC section (legal), abstract length buckets, MRC answer type (number / composition / structure).
+* **Size:** ~100–200 examples total, stratified across the three tasks (e.g. ~35–65 each), drawn from the programmatically filtered set.
+* **Stratify further within task** when possible: IPC section (IPC reasoning), abstract length buckets, MRC answer type (number / composition / structure).
 * **Annotators:** ideally 2 people with patent/technical literacy (examiner trainee, patent attorney, or ML researcher + domain consult). One primary + one secondary for agreement.
 
 ### Interface (lightweight)
@@ -19,7 +19,7 @@ Spreadsheet or simple Label Studio / Argilla project with columns:
 |-------|---------|
 | `application_number`, `task` | ids |
 | shown `instruction`, `input`, `output` | full text (truncate UI with expand) |
-| for legal: show `meta.primary_ipc` + official IPC title/definition from catalog | grounding for the rater |
+| for IPC reasoning: show `meta.primary_ipc` + official IPC title/definition from catalog | grounding for the rater |
 | ratings | see below |
 | free-text note | optional |
 
@@ -30,9 +30,8 @@ Shared:
 * **Overall accept?** (`yes` / `no` / `fix`) — primary paper metric for “usable SFT row.”
 
 Task-specific (1–5):
-* **legal_reasoning:** *IPC plausibility*, *justification faithfulness to claims*, *no hallucinated facts/codes*
+* **ipc_reasoning:** *IPC plausibility*, *justification faithfulness to claims*, *no hallucinated facts/codes*
 * **abstract_drafting:** *coverage of independent claim*, *no contradiction with claims*, *appropriate abstract style*
-* **patent_drafting:** *claim matches abstract inventive concept*, *independent-claim form*, *over/under-breadth red flags*
 * **mrc:** *answer supported by span in claims*, *question specificity*, *no speculation*
 
 ### Process

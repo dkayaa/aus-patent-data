@@ -21,7 +21,7 @@ Compare fine-tuned students against each other and against baselines on a frozen
 
 ## Automatic metrics by task
 
-### Legal reasoning & classification
+### IPC reasoning & classification
 
 | Metric | What it measures | Notes |
 |--------|------------------|--------|
@@ -42,17 +42,6 @@ PatentBERT-style baselines: report IPC/subclass accuracy only; mark generative m
 | **BERTScore (F1)** | Token-level contextual similarity vs gold | Captures paraphrase better than ROUGE |
 | **Semantic cosine** | Sentence embedding similarity vs gold abstract (and vs claims for faithfulness) | Align with Mode 1 pair definitions |
 | **Length / compression stats** | `|pred|`, `|pred|/|claims|` vs gold distribution | Detect verbosity collapse or copy-all |
-
-### Patent drafting (claim 1)
-
-| Metric | What it measures | Notes |
-|--------|------------------|--------|
-| **ROUGE-L / BLEU / BERTScore** | Overlap / similarity vs gold claim 1 | Same family as abstract drafting |
-| **Semantic cosine** | Pred vs gold claim; pred vs source abstract | Faithfulness to inventive concept |
-| **Claim-form validity rate** | Starts with claim numbering / independent-claim shape heuristics | Cheap structural check, not legal validity |
-| **Novelty of wording vs abstract** | 1 − ROUGE against input abstract | Flags abstract-copy failures |
-
-True legal claim quality is **not** claimed from n-gram scores alone; pair with judge/human on a sample.
 
 ### Machine reading comprehension (MRC)
 
@@ -80,11 +69,10 @@ For open models only: trainable parameter count, wall-clock train time, tokens/s
 
 ## How to read the comparison
 * **Did SFT help?** Student vs untuned base on the same automatic metrics (paired).
-* **Is the gain competitive?** Student vs few-shot base and vs PatentBERT (legal codes only).
+* **Is the gain competitive?** Student vs few-shot base and vs PatentBERT (IPC codes only).
 * **Ceiling / reference?** Frontier API on the same sample (clearly labeled as unmatched compute).
-* **Quality beyond n-grams?** LLM judge + human on drafting and legal justifications, where ROUGE can mislead.
+* **Quality beyond n-grams?** LLM judge + human on abstract drafting and IPC justifications, where ROUGE can mislead.
 
 ## Non-goals
 * Optimizing only for ROUGE on drafting without a faithfulness or human check.
 * Averaging IPC accuracy with ROUGE into a single unweighted “overall score” without stating the aggregation rule.
-* Declaring legal correctness of claims from automatic overlap alone.

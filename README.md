@@ -127,7 +127,7 @@ python scripts/download_patentbert.py
 python scripts/run_patentbert.py
 
 # Instruction-tuning JSONL (local Llama OpenAI-compatible server by default).
-python scripts/generate_instruction_data.py --task legal_reasoning --limit 20
+python scripts/generate_instruction_data.py --task ipc_reasoning --limit 20
 ```
 
 See `scrape/README.md` for config (client credentials → JWT, `max_responses`, backoff) and idempotent re-runs. See `classification/README.md` for PatentBERT. See `instruction-generation/README.md` for LLM provider swap (local / OpenRouter).

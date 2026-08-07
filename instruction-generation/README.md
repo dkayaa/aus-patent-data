@@ -9,7 +9,7 @@ Task methodologies: `methodologies/01-instruction-data-generation/`.
 | Path | Role |
 |------|------|
 | `data/interim/patent_search_clean/` | Cleaned patent shards (`part-*.jsonl.gz`) |
-| `data/ipc-codes/ipc_codes_20260101.jsonl` | IPC titles / definitions for legal reasoning |
+| `data/ipc-codes/ipc_codes_20260101.jsonl` | IPC titles / definitions for IPC reasoning |
 
 ## Outputs
 
@@ -21,9 +21,8 @@ Alpaca-style records: `task`, `application_number`, `instruction`, `input`, `out
 
 | `--task` | Method |
 |----------|--------|
-| `legal_reasoning` | Instruction pool + LLM justification of `primary_ipc` (skip if no WIPO definition) |
+| `ipc_reasoning` | Instruction pool + LLM justification of `primary_ipc` (skip if no WIPO definition) |
 | `abstract_drafting` | Instruction pool; claims → official abstract |
-| `patent_drafting` | Instruction pool; abstract → claim 1 |
 | `mrc` | LLM extractive Q/A over claims (no shared pool; question = instruction) |
 
 ## LLM providers
@@ -42,9 +41,9 @@ Same client code path; swap via YAML or CLI flags.
 pip install -r requirements.txt
 
 # local Llama (default config)
-.venv/bin/python scripts/generate_instruction_data.py --task legal_reasoning --limit 20
+.venv/bin/python scripts/generate_instruction_data.py --task ipc_reasoning --limit 20
 
-# all four tasks
+# all three tasks
 .venv/bin/python scripts/generate_instruction_data.py --all --limit 50
 
 # OpenRouter

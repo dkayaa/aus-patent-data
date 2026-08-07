@@ -13,7 +13,7 @@ Suggested order: programmatic filter/score → LLM judge on a sample of survivor
 ## Run Mode 1
 
 ```bash
-.venv/bin/python scripts/validate_instruction_data.py --task legal_reasoning
+.venv/bin/python scripts/validate_instruction_data.py --task ipc_reasoning
 .venv/bin/python scripts/validate_instruction_data.py --all
 ```
 

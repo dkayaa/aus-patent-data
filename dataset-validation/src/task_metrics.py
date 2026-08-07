@@ -4,15 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from ipc_checks import check_legal_ipc, parse_legal_output
+from ipc_checks import check_ipc_reasoning, parse_ipc_output
 from lexical import answer_contained, rouge_l_f1, token_f1
 from schema import check_schema, check_task_light, simple_tokenize
 from semantic import SemanticScorer
 
 TASKS = (
-    "legal_reasoning",
+    "ipc_reasoning",
     "abstract_drafting",
-    "patent_drafting",
     "mrc",
 )
 
@@ -23,13 +22,13 @@ def text_pair(record: dict[str, Any]) -> tuple[str, str] | None:
     input_text = str(record.get("input") or "")
     output = str(record.get("output") or "")
 
-    if task == "legal_reasoning":
-        _, body = parse_legal_output(output)
+    if task == "ipc_reasoning":
+        _, body = parse_ipc_output(output)
         if not body:
             return None
         return input_text, body
 
-    if task in {"abstract_drafting", "patent_drafting", "mrc"}:
+    if task in {"abstract_drafting", "mrc"}:
         return input_text, output
 
     return None
@@ -49,8 +48,8 @@ def length_features(input_text: str, output_text: str) -> dict[str, float | int]
 def structural_failures(record: dict[str, Any], *, expected_task: str) -> list[str]:
     fails = check_schema(record, expected_task=expected_task)
     fails.extend(check_task_light(record))
-    if expected_task == "legal_reasoning":
-        ipc_fails, _ = check_legal_ipc(record)
+    if expected_task == "ipc_reasoning":
+        ipc_fails, _ = check_ipc_reasoning(record)
         fails.extend(ipc_fails)
     return fails
 
@@ -68,8 +67,8 @@ def score_record(
     pair = text_pair(record)
     input_text = str(record.get("input") or "")
     output_text = str(record.get("output") or "")
-    if task == "legal_reasoning":
-        _, body = parse_legal_output(output_text)
+    if task == "ipc_reasoning":
+        _, body = parse_ipc_output(output_text)
         scored_out = body or ""
     else:
         scored_out = output_text

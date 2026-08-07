@@ -1,4 +1,4 @@
-"""IPC regex and Classification/Justification parsing for legal_reasoning."""
+"""IPC regex and Classification/Justification parsing for ipc_reasoning."""
 
 from __future__ import annotations
 
@@ -21,14 +21,14 @@ def normalize_ipc(code: str) -> str:
     return code.strip().upper().replace(" ", "")
 
 
-def parse_legal_output(output: str) -> tuple[str | None, str | None]:
+def parse_ipc_output(output: str) -> tuple[str | None, str | None]:
     m = OUTPUT_RE.search(output.strip())
     if not m:
         return None, None
     return normalize_ipc(m.group("code")), m.group("body").strip()
 
 
-def check_legal_ipc(record: dict[str, Any]) -> tuple[list[str], str | None]:
+def check_ipc_reasoning(record: dict[str, Any]) -> tuple[list[str], str | None]:
     """Return (failures, justification_body)."""
     failures: list[str] = []
     meta = record.get("meta") if isinstance(record.get("meta"), dict) else {}
@@ -39,7 +39,7 @@ def check_legal_ipc(record: dict[str, Any]) -> tuple[list[str], str | None]:
         failures.append("primary_ipc_invalid")
         primary = primary or None  # type: ignore[assignment]
 
-    code, body = parse_legal_output(str(record.get("output") or ""))
+    code, body = parse_ipc_output(str(record.get("output") or ""))
     if code is None or not body:
         failures.append("output_parse_failed")
         return failures, body

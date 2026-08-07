@@ -1,4 +1,4 @@
-"""Load WIPO IPC catalog JSONL for grounding legal-reasoning prompts."""
+"""Load WIPO IPC catalog JSONL for grounding ipc-reasoning prompts."""
 
 from __future__ import annotations
 

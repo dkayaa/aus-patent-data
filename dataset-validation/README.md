@@ -14,7 +14,7 @@ Methodology: [`methodologies/02-dataset-validation/`](../methodologies/02-datase
 ```bash
 .venv/bin/pip install -r requirements.txt
 
-.venv/bin/python scripts/validate_instruction_data.py --task legal_reasoning
+.venv/bin/python scripts/validate_instruction_data.py --task ipc_reasoning
 .venv/bin/python scripts/validate_instruction_data.py --all --limit 100
 
 # lexical/structural only (no embedding download)
@@ -38,7 +38,7 @@ Grades a **deterministic sample** of Mode 1 survivors (`sample_size: 50` per tas
 ```bash
 set -a && source .env && set +a
 
-.venv/bin/python scripts/judge_instruction_data.py --task legal_reasoning
+.venv/bin/python scripts/judge_instruction_data.py --task ipc_reasoning
 .venv/bin/python scripts/judge_instruction_data.py --all --limit 50
 .venv/bin/python scripts/judge_instruction_data.py --task mrc \
   --provider openrouter --model anthropic/claude-sonnet-4.6

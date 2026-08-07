@@ -2,7 +2,7 @@
 ---
 
 ## Objective
-Adapt one or more open-source instruction-capable LLMs on the validated Australian patent SFT corpus so they improve on the four seed tasks (legal reasoning, abstract drafting, patent drafting, MRC) relative to their untuned base and to external baselines.
+Adapt one or more open-source instruction-capable LLMs on the validated Australian patent SFT corpus so they improve on the three seed tasks (IPC reasoning, abstract drafting, MRC) relative to their untuned base and to external baselines.
 
 ## Inputs
 * Train / validation rows from `data/interim/instruction_generation_validation/<task>/passed/` (and any human-audited or judge-filtered subsets once frozen).
@@ -18,10 +18,10 @@ Document exact Hugging Face IDs, tokenizer, and chat template in the run config 
 ## Training modes
 
 ### Per-task SFT
-Train a specialist checkpoint on one task’s JSONL. Best for isolating whether the data helps that capability; report four specialists when comparing task-wise.
+Train a specialist checkpoint on one task’s JSONL. Best for isolating whether the data helps that capability; report three specialists when comparing task-wise.
 
 ### Multi-task SFT
-Pool all four tasks (stratified or proportional sampling). One checkpoint serves as the primary “patent instruction” model for the paper unless specialists clearly win.
+Pool all three tasks (stratified or proportional sampling). One checkpoint serves as the primary “patent instruction” model for the paper unless specialists clearly win.
 
 ### Parameter-efficient default
 Prefer **LoRA / QLoRA** adapters over full fine-tunes for reproducibility and cost:
@@ -32,12 +32,12 @@ Prefer **LoRA / QLoRA** adapters over full fine-tunes for reproducibility and co
 ## Task-aware formatting
 * Keep the generation-time instruction pools: students see diverse phrasings of the same task.
 * Prompt format: chat template of the base model; train on assistant completion of `output` given system (optional) + user (`instruction` + `input`).
-* **legal_reasoning:** target remains `Classification: <IPC>\nJustification: …` so classification accuracy is measurable.
+* **ipc_reasoning:** target remains `Classification: <IPC>\nJustification: …` so classification accuracy is measurable.
 * **mrc:** short extractive answers; avoid length penalties that favor verbose drafting styles.
 
 ## Splits and leakage
 * Split by `application_number` (or patent family) so the same filing never appears in both train and test.
-* Stratify by task and, where possible, IPC section (legal) / length buckets (drafting).
+* Stratify by task and, where possible, IPC section (IPC reasoning) / length buckets (abstract drafting).
 * Freeze split manifests under `data/interim/` (or later `data/processed/`) before any student training.
 
 ## Non-goals

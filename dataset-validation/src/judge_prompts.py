@@ -6,9 +6,8 @@ import json
 from typing import Any
 
 TASKS = (
-    "legal_reasoning",
+    "ipc_reasoning",
     "abstract_drafting",
-    "patent_drafting",
     "mrc",
 )
 
@@ -25,7 +24,7 @@ _JSON_SCHEMA = (
 )
 
 _RUBRICS: dict[str, str] = {
-    "legal_reasoning": """Task: legal_reasoning (IPC justification).
+    "ipc_reasoning": """Task: ipc_reasoning (IPC justification).
 The Classification / meta.primary_ipc is GOLD office label. Do NOT re-classify the patent or fail the example because a different IPC might fit better.
 Grade only the Justification quality relative to that fixed code.
 High score (4-5): Classification equals primary_ipc; Justification maps claim/abstract subject matter to that assigned place; no invented IPC codes or fabricated WIPO definitions; reasoning engages the claims (not empty/boilerplate).
@@ -36,11 +35,6 @@ Set pass=true only if the example is usable for SFT (typically score >= 4).""",
 The output is gold patent text. Judge *triple coherence*, not abstract writing quality:
 High score: instruction asks to summarize/draft an abstract; input looks like claims; output looks like a matching abstract for those claims (no obvious topic mismatch or swapped fields).
 Low score: instruction/input/output misaligned, truncated nonsense, or abstract clearly about a different invention than the claims.
-Set pass=true only if usable for SFT (typically score >= 4).""",
-    "patent_drafting": """Task: patent_drafting (abstract → claim 1).
-The output is gold claim text. Judge coherence and form:
-High score: instruction asks for an independent claim; input is an abstract; output is a plausible Claim 1 for that abstract (claim-like numbering/form, on-topic).
-Low score: off-topic claim, not claim-like, or fields clearly mismatched.
 Set pass=true only if usable for SFT (typically score >= 4).""",
     "mrc": """Task: mrc (extractive QA over claims).
 High score: the question is answerable from the claims alone; the answer is supported by an explicit span or clear paraphrase of claim text; no speculation outside the claims.
