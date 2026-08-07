@@ -8,7 +8,7 @@ Does **not** define the application universe. That comes from the IP Rapid / dat
 
 1. Read application identifiers from a base file under `data/raw/` (e.g. `application_number`).
 2. Call the IP Australia API (and related endpoints as needed) to fetch abstracts, descriptions, claims, or other semantic text.
-3. Write raw API responses into `data/interim/` as batched `part-*.jsonl.gz` shards.
+3. Write raw API responses into `data/derived/` as batched `part-*.jsonl.gz` shards.
 
 ## Rules
 
@@ -84,15 +84,15 @@ python scripts/fetch_patent_search.py
 python scripts/fetch_patent_search.py --max-responses 5 -v
 ```
 
-## Cleaner (reshape interim)
+## Cleaner (reshape derived)
 
-Post-process raw Patent Search caches into a flatter analysis-ready interim set (no API calls).
+Post-process raw Patent Search caches into a flatter analysis-ready derived set (no API calls).
 
 | | |
 |---|---|
 | Config | `config/clean_patent_search.yaml` |
 | Module | `src/clean_patent_search.py` |
-| **Reads** | `paths.input_dir` (default `data/interim/patent_search/part-*.jsonl.gz`) |
+| **Reads** | `paths.input_dir` (default `data/derived/patent_search/part-*.jsonl.gz`) |
 | **Writes** | Mirrored `paths.output_dir/part-*.jsonl.gz` plus `summary.json` |
 
 Each cleaned line keeps status/title/IPC/parties/dates plus `publishedDocuments[]` with `abstract` and parsed `claims` (`claims_parse_ok` flags OCR/split failures). Outputs are always rewritten (deterministic, cheap). The run also writes `summary.json` in the output dir with counts and the full `claims_parse_failures` list.

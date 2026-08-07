@@ -2,7 +2,7 @@
 
 **Stage:** labeling and enrichment of already-fetched records.
 
-Reads base + API-enriched tables from `data/`, applies taxonomies / rules / models, and writes labeled outputs to `data/interim/` and `data/processed/`.
+Reads base + API-enriched tables from `data/`, applies taxonomies / rules / models, and writes labeled outputs to `data/derived/` and `data/processed/`.
 
 ## Rules
 
@@ -20,14 +20,14 @@ Reads base + API-enriched tables from `data/`, applies taxonomies / rules / mode
 
 ## PatentBERT (CPC subclass, claim-level)
 
-Multi-label CPC-subclass inference from the released PatentBERT checkpoint (paper: https://doi.org/10.1016/j.wpi.2020.101965). One prediction per row of `data/interim/patent_search_text/claims.csv` (no claim concatenation).
+Multi-label CPC-subclass inference from the released PatentBERT checkpoint (paper: https://doi.org/10.1016/j.wpi.2020.101965). One prediction per row of `data/derived/patent_search_text/claims.csv` (no claim concatenation).
 
 | | |
 |---|---|
 | Config | `config/patentbert.yaml` |
 | Modules | `src/download_patentbert.py`, `src/run_patentbert.py`, `src/patentbert/` (TF1) |
 | Checkpoint | `models/patentbert/` (`model.ckpt-181172*`, `labels_group_id.tsv`, `vocab.txt`, `bert_config.json`) |
-| Writes | `data/interim/patentbert/` — `row_map.csv`, `predict_result.txt`, `predictions.csv` (add `--gzip` for `*.gz`) |
+| Writes | `data/derived/patentbert/` — `row_map.csv`, `predict_result.txt`, `predictions.csv` (add `--gzip` for `*.gz`) |
 | Streaming | Claims CSV is read row-by-row; TF1 sees at most `infer.chunk_size` rows per invoke (default `1000`) |
 
 **`multi_hot_threshold`** (default `0.3`): sigmoid probability cutoff. CPC subclasses with score `>` threshold are kept. Lower → more labels per claim; higher → fewer.
@@ -79,8 +79,8 @@ python scripts/run_patentbert.py --prepare-only --gzip
 
 ## Inputs / outputs
 
-- **Reads:** enriched tables from `data/raw/` and/or `data/interim/` (after scrape), plus the base application dump as needed
-- **Writes:** `data/interim/`, `data/processed/`
+- **Reads:** enriched tables from `data/raw/` and/or `data/derived/` (after scrape), plus the base application dump as needed
+- **Writes:** `data/derived/`, `data/processed/`
 
 ## How to run
 

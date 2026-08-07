@@ -20,7 +20,7 @@ Work is organized by **pipeline stage**, not by language or framework:
 
 | Stage | Directory | Responsibility |
 |-------|-----------|----------------|
-| Base + artifacts | `data/` | Seed dumps (`raw/`), scrape outputs, interim joins, final dataset. |
+| Base + artifacts | `data/` | Seed dumps (`raw/`), scrape outputs, derived joins, final dataset. |
 | Enrich | `scrape/` | Call IP Australia (and related) APIs to fetch semantic text for known application numbers. Does not invent the application list. |
 | Label | `classification/` | Apply taxonomies, rules, or models. No API fetching of patent text. |
 | Instruction SFT | `instruction-generation/` | Synthetic instruction-tuning JSONL from cleaned patents + IPC catalog via LLM (local or OpenRouter). |
@@ -29,7 +29,7 @@ Work is organized by **pipeline stage**, not by language or framework:
 
 1. **Do not mix stages.** API clients and downloaders stay in `scrape/`. Labeling stays in `classification/`. Synthetic SFT generation stays in `instruction-generation/`.
 2. **Scrape is enrichment, not discovery.** The application universe comes from IP Rapid (or a full dump later). Scrapers take `application_number` (and related IDs) from `data/raw/` and fetch text/metadata from IP Australia.
-3. **Pipeline direction:** `data/raw` (base) → `scrape/` → enriched artifacts in `data/` → (`classification/` and/or `instruction-generation/`) → `data/interim/` / `data/processed/`.
+3. **Pipeline direction:** `data/raw` (base) → `scrape/` → enriched artifacts in `data/` → (`classification/` and/or `instruction-generation/`) → `data/derived/` / `data/processed/`.
 4. **Toy vs bulk via Git LFS.** Dataset files under `data/` (`*.csv`, `*.json`, archives, etc.) are tracked with **Git LFS** (see `.gitattributes`). Pointers live in git; blobs live in LFS storage. Install with `git lfs install` before cloning/pulling data.
 5. **Prefer importable modules over notebooks** for anything that must be reproducible for the paper.
 6. **Document sources and regeneration** in each stage README (what is read, what is written, how to run).
@@ -53,10 +53,10 @@ Work is organized by **pipeline stage**, not by language or framework:
 data/raw/application-toy.csv   (IP Rapid seed: IDs + status/dates)
             │
             ▼
-         scrape/   ── IP Australia API: semantic / textual fields ──►  data/interim/
+         scrape/   ── IP Australia API: semantic / textual fields ──►  data/derived/
             │
-            ├─► classification/          ── labels / models ──► data/interim/
-            └─► instruction-generation/ ── synthetic SFT JSONL ──► data/interim/instruction_generation/
+            ├─► classification/          ── labels / models ──► data/derived/
+            └─► instruction-generation/ ── synthetic SFT JSONL ──► data/derived/instruction_generation/
 ```
 
 Each stage should use **explicit paths** (config or CLI args).
@@ -92,7 +92,7 @@ aus-patent-data/
 ├── data/
 │   ├── raw/                # base dumps + (later) raw API payloads
 │   │   └── application-toy.csv
-│   ├── interim/
+│   ├── derived/
 │   ├── processed/
 │   └── README.md
 ├── scripts/
@@ -104,10 +104,10 @@ aus-patent-data/
 
 - Base toy sample: `data/raw/application-toy.csv` (IP Rapid-style application rows).
 - Patent Search API enrichment: `scrape/src/patent_search.py` → `part-*.jsonl.gz` shards under the configured `patent_search` output dir.
-- Patent Search clean: `scrape/src/clean_patent_search.py` → mirrored `part-*.jsonl.gz` under `data/interim/patent_search_clean/`.
-- Classification: PatentBERT claim-level CPC-subclass inference (`classification/src/run_patentbert.py` → `data/interim/patentbert/`).
-- Instruction generation: synthetic SFT JSONL (`instruction-generation/` → `data/interim/instruction_generation/`).
-- Dataset validation: Mode 1 `scripts/validate_instruction_data.py`; Mode 2 sample judge `scripts/judge_instruction_data.py` → `data/interim/instruction_generation_validation/`.
+- Patent Search clean: `scrape/src/clean_patent_search.py` → mirrored `part-*.jsonl.gz` under `data/derived/patent_search_clean/`.
+- Classification: PatentBERT claim-level CPC-subclass inference (`classification/src/run_patentbert.py` → `data/derived/patentbert/`).
+- Instruction generation: synthetic SFT JSONL (`instruction-generation/` → `data/derived/instruction_generation/`).
+- Dataset validation: Mode 1 `scripts/validate_instruction_data.py`; Mode 2 sample judge `scripts/judge_instruction_data.py` → `data/derived/instruction_generation_validation/`.
 
 ## Reproduction (partial)
 

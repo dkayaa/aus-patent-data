@@ -21,7 +21,7 @@ Methodology: [`methodologies/02-dataset-validation/`](../methodologies/02-datase
 .venv/bin/python scripts/validate_instruction_data.py --task mrc --skip-semantic
 ```
 
-Outputs under `data/interim/instruction_generation_validation/<task>/`:
+Outputs under `data/derived/instruction_generation_validation/<task>/`:
 
 | Path | Content |
 |------|---------|

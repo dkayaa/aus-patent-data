@@ -184,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
     paths = cfg.get("paths") or {}
     patents_dir = _resolve(
         args.patents_dir
-        or Path(paths.get("patents_dir") or "data/interim/patent_search_clean")
+        or Path(paths.get("patents_dir") or "data/derived/patent_search_clean")
     )
     ipc_jsonl = _resolve(
         args.ipc_jsonl
@@ -192,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     output_root = _resolve(
         args.output_dir
-        or Path(paths.get("output_dir") or "data/interim/instruction_generation")
+        or Path(paths.get("output_dir") or "data/derived/instruction_generation")
     )
 
     if not patents_dir.is_dir():

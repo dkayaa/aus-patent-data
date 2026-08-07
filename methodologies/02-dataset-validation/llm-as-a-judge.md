@@ -15,7 +15,7 @@ They show strong LLM judges can reach ~human–human agreement levels on open-en
 Optional complementary rubric style: Liu et al., *G-Eval* (EMNLP 2023) — step-by-step criteria then score — useful when we want dimensioned rubrics rather than a single preference vote.
 
 ## Scope
-**Sample-based by default** (not a full-corpus judge pass): Mode 1 survivors at `data/interim/instruction_generation_validation/<task>/passed/`, default `sample_size: 50` per task (`--limit` overrides). Prefer judging after programmatic filters (Mode 1).
+**Sample-based by default** (not a full-corpus judge pass): Mode 1 survivors at `data/derived/instruction_generation_validation/<task>/passed/`, default `sample_size: 50` per task (`--limit` overrides). Prefer judging after programmatic filters (Mode 1).
 
 ## Run
 

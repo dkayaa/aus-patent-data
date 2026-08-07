@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Thin runner for Patent Search interim cleaning."""
+"""Thin runner for Patent Search derived cleaning."""
 
 from __future__ import annotations
 

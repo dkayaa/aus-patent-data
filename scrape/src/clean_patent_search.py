@@ -1,8 +1,8 @@
-"""Reshape Patent Search interim JSONL shards into a flatter cleaned set.
+"""Reshape Patent Search derived JSONL shards into a flatter cleaned set.
 
-Reads ``part-*.jsonl.gz`` from ``data/interim/patent_search/``, parses
+Reads ``part-*.jsonl.gz`` from ``data/derived/patent_search/``, parses
 ``claimsText`` into claim lists, and writes mirrored
-``part-*.jsonl.gz`` under ``data/interim/patent_search_clean/`` plus a
+``part-*.jsonl.gz`` under ``data/derived/patent_search_clean/`` plus a
 ``summary.json`` manifest (counts and parse failures).
 """
 
@@ -522,7 +522,7 @@ def run(cfg: CleanConfig) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description=(
-            "Clean Patent Search interim JSONL.GZ shards into analysis-ready "
+            "Clean Patent Search derived JSONL.GZ shards into analysis-ready "
             "JSONL.GZ shards."
         )
     )

@@ -15,7 +15,7 @@ Work is organized by **pipeline stage**, not by language or framework. See also 
 
 | Stage | Directory | Responsibility |
 |-------|-----------|----------------|
-| Base + artifacts | `data/` | Seed dumps (`raw/`), scrape outputs, interim joins, final dataset. |
+| Base + artifacts | `data/` | Seed dumps (`raw/`), scrape outputs, derived joins, final dataset. |
 | Enrich | `scrape/` | Call IP Australia (and related) APIs to fetch semantic text for known application numbers. Does not invent the application list. |
 | Label | `classification/` | Apply taxonomies, rules, or models. No API fetching of patent text. |
 | Instruction SFT | `instruction-generation/` | Build synthetic instruction-tuning JSONL from cleaned patents + IPC catalog via an LLM (local OpenAI-compatible server or OpenRouter). No IP Australia scraping; not taxonomy labeling. |
@@ -25,5 +25,5 @@ Work is organized by **pipeline stage**, not by language or framework. See also 
 
 1. **Do not mix stages.** API clients and downloaders stay in `scrape/`. Labeling stays in `classification/`. Synthetic SFT generation stays in `instruction-generation/`. Validation scoring stays in `dataset-validation/`.
 2. **Scrape is enrichment, not discovery.** The application universe comes from IP Rapid (or a full dump later).
-3. **Pipeline direction:** `data/raw` → `scrape/` → `data/interim/patent_search_clean` → (`classification/` and/or `instruction-generation/` → `dataset-validation/`) → further `data/interim/` / `data/processed/`.
+3. **Pipeline direction:** `data/raw` → `scrape/` → `data/derived/patent_search_clean` → (`classification/` and/or `instruction-generation/` → `dataset-validation/`) → further `data/derived/` / `data/processed/`.
 4. Methodology notes live under `methodologies/` (e.g. `01-instruction-data-generation/`, `02-dataset-validation/`). Runnable generation: `instruction-generation/` + `scripts/generate_instruction_data.py`. Mode 1: `scripts/validate_instruction_data.py`. Mode 2 LLM-as-a-judge: `scripts/judge_instruction_data.py` (under `dataset-validation/`).

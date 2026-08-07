@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Analyze patent_search_clean interim JSONL.GZ → CSV tables and plots.
+"""Analyze patent_search_clean derived JSONL.GZ → CSV tables and plots.
 
 Per-patent metrics use one primary published document (prefer B* over A*) so
 A1/B2 versions of the same application are not double-counted.
@@ -29,7 +29,7 @@ sys.path.insert(0, str(REPO_ROOT / "scrape" / "src"))
 
 from jsonl_gz import iter_shard_records  # noqa: E402
 
-DEFAULT_INPUT = REPO_ROOT / "data" / "interim" / "patent_search_clean"
+DEFAULT_INPUT = REPO_ROOT / "data" / "derived" / "patent_search_clean"
 DEFAULT_TABLES = REPO_ROOT / "data" / "tables"
 DEFAULT_PLOTS = REPO_ROOT / "data" / "plots"
 DEFAULT_TOKENIZER = "bert-base-uncased"
@@ -619,7 +619,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--input-dir",
         type=Path,
         default=DEFAULT_INPUT,
-        help=f"Clean interim JSONL.GZ dir (default: {DEFAULT_INPUT})",
+        help=f"Clean derived JSONL.GZ dir (default: {DEFAULT_INPUT})",
     )
     p.add_argument(
         "--tables-dir",

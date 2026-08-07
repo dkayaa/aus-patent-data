@@ -13,7 +13,7 @@ Before pairing patents, build a **cached pool of diverse instruction phrasings**
 
 1. Send a meta-prompt to the generator LLM asking for N professional variants (e.g. examiner memo, attorney note, brief rationale) that all ask for an IPC justification from abstract + claims.
 2. Parse the JSON list of strings and append until the pool reaches the configured size (default 40).
-3. Persist under `data/interim/instruction_generation/_pools/ipc_reasoning.json`.
+3. Persist under `data/derived/instruction_generation/_pools/ipc_reasoning.json`.
 4. For each training example, **randomly sample one** pool string as the Alpaca `instruction` field.
 
 This is instruction-phrasing diversification (Self-Instruct-style expansion of wordings for a *fixed* task), not full Evol-Instruct (no iterative seed evolution). The pool avoids overfitting a single fixed template at fine-tune time.

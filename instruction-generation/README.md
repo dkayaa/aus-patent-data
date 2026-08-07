@@ -8,12 +8,12 @@ Task methodologies: `methodologies/01-instruction-data-generation/`.
 
 | Path | Role |
 |------|------|
-| `data/interim/patent_search_clean/` | Cleaned patent shards (`part-*.jsonl.gz`) |
+| `data/derived/patent_search_clean/` | Cleaned patent shards (`part-*.jsonl.gz`) |
 | `data/ipc-codes/ipc_codes_20260101.jsonl` | IPC titles / definitions for IPC reasoning |
 
 ## Outputs
 
-`data/interim/instruction_generation/<task>/part-*.jsonl.gz` plus `done_ids.txt` for resume.
+`data/derived/instruction_generation/<task>/part-*.jsonl.gz` plus `done_ids.txt` for resume.
 
 Alpaca-style records: `task`, `application_number`, `instruction`, `input`, `output`, `meta`.
 
@@ -52,4 +52,4 @@ export OPENROUTER_API_KEY='...'
   --task mrc --provider openrouter --model meta-llama/llama-3.1-8b-instruct --limit 10
 ```
 
-Instruction pools (diversified phrasings for a fixed task) are generated once per task and cached under `data/interim/instruction_generation/_pools/`. See `methodologies/01-instruction-data-generation/` for the full workflow.
+Instruction pools (diversified phrasings for a fixed task) are generated once per task and cached under `data/derived/instruction_generation/_pools/`. See `methodologies/01-instruction-data-generation/` for the full workflow.

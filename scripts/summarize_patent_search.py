@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize patent_search interim JSONL.GZ payloads in a folder."""
+"""Summarize patent_search derived JSONL.GZ payloads in a folder."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ sys.path.insert(0, str(REPO_ROOT / "scrape" / "src"))
 
 from jsonl_gz import iter_shard_records  # noqa: E402
 
-DEFAULT_DIR = REPO_ROOT / "data" / "interim" / "patent_search"
+DEFAULT_DIR = REPO_ROOT / "data" / "derived" / "patent_search"
 
 
 def summarize(input_dir: Path) -> dict[str, float | int]:
@@ -102,7 +102,7 @@ def _print_table(stats: dict[str, float | int], input_dir: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Summarize patent_search interim JSONL.GZ payloads."
+        description="Summarize patent_search derived JSONL.GZ payloads."
     )
     parser.add_argument(
         "--input-dir",

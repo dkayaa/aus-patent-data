@@ -5,7 +5,7 @@
 Adapt one or more open-source instruction-capable LLMs on the validated Australian patent SFT corpus so they improve on the three seed tasks (IPC reasoning, abstract drafting, MRC) relative to their untuned base and to external baselines.
 
 ## Inputs
-* Train / validation rows from `data/interim/instruction_generation_validation/<task>/passed/` (and any human-audited or judge-filtered subsets once frozen).
+* Train / validation rows from `data/derived/instruction_generation_validation/<task>/passed/` (and any human-audited or judge-filtered subsets once frozen).
 * Alpaca-style fields: `instruction`, `input`, `output` (plus `task`, `application_number`, `meta` for stratification and leakage control).
 
 ## Student models (candidates)
@@ -38,7 +38,7 @@ Prefer **LoRA / QLoRA** adapters over full fine-tunes for reproducibility and co
 ## Splits and leakage
 * Split by `application_number` (or patent family) so the same filing never appears in both train and test.
 * Stratify by task and, where possible, IPC section (IPC reasoning) / length buckets (abstract drafting).
-* Freeze split manifests under `data/interim/` (or later `data/processed/`) before any student training.
+* Freeze split manifests under `data/derived/` (or later `data/processed/`) before any student training.
 
 ## Non-goals
 * Continued pretraining on raw patent dumps (domain CPT) unless added as a separate ablation.

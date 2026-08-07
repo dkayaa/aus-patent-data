@@ -7,7 +7,7 @@ Dataset artifacts and seed dumps (not pipeline source code).
 | Subdir | Meaning |
 |--------|---------|
 | `raw/` | Base IP Rapid dumps and raw API payloads from scrape |
-| `interim/` | Joined / cleaned / partially labeled tables |
+| `derived/` | Joined / cleaned / partially labeled tables |
 | `processed/` | Final labeled dataset for analysis / release |
 | `tables/` | Analysis CSV exports (e.g. from `scripts/analyze_patent_search_clean.py`) |
 | `plots/` | Analysis plot PNGs |
@@ -34,14 +34,14 @@ Scrapers use `application_number` (and related IDs) to pull semantic text from t
 - Prefer regenerating enriched and labeled files from `scrape/` + `classification/` over hand-editing.
 - Update this README when schema or row counts change.
 
-## Interim (scrape outputs)
+## Derived (scrape / pipeline outputs)
 
 | Path | Producer | Role |
 |------|----------|------|
-| Configured by `scrape/config/patent_search.yaml` → `paths.output_dir` (default: `data/interim/patent_search/`) | `scrape/src/patent_search.py` | Raw Patent Search API responses as `part-*.jsonl.gz` + `fetched_ids.txt` |
-| `interim/patent_search_clean/` (or `scrape/config/clean_patent_search.yaml` → `paths.output_dir`) | `scrape/src/clean_patent_search.py` | Flattened records with parsed claims (`part-*.jsonl.gz`) |
-| `interim/patent_search_text/` | `scripts/export_patent_text_csvs.py` | Classification-oriented CSVs: `abstracts.csv`, `first_claims.csv`, `claims.csv` |
-| `interim/patentbert/` | `scripts/run_patentbert.py` | Claim-level PatentBERT CPC-subclass predictions (`input.tsv[.gz]`, `row_map.csv[.gz]`, `predict_result.txt[.gz]`, `predictions.csv[.gz]`) |
+| Configured by `scrape/config/patent_search.yaml` → `paths.output_dir` (default: `data/derived/patent_search/`) | `scrape/src/patent_search.py` | Raw Patent Search API responses as `part-*.jsonl.gz` + `fetched_ids.txt` |
+| `derived/patent_search_clean/` (or `scrape/config/clean_patent_search.yaml` → `paths.output_dir`) | `scrape/src/clean_patent_search.py` | Flattened records with parsed claims (`part-*.jsonl.gz`) |
+| `derived/patent_search_text/` | `scripts/export_patent_text_csvs.py` | Classification-oriented CSVs: `abstracts.csv`, `first_claims.csv`, `claims.csv` |
+| `derived/patentbert/` | `scripts/run_patentbert.py` | Claim-level PatentBERT CPC-subclass predictions (`input.tsv[.gz]`, `row_map.csv[.gz]`, `predict_result.txt[.gz]`, `predictions.csv[.gz]`) |
 
 ### `patent_search` / `patent_search_clean` storage
 

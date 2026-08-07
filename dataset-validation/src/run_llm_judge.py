@@ -272,8 +272,8 @@ def main(argv: list[str] | None = None) -> int:
     judge_cfg = cfg.get("judge") or {}
     llm_raw = cfg.get("llm") or {}
 
-    input_root = _resolve(Path(paths.get("input_root", "data/interim/instruction_generation_validation")))
-    output_root = _resolve(Path(paths.get("output_root", "data/interim/instruction_generation_validation")))
+    input_root = _resolve(Path(paths.get("input_root", "data/derived/instruction_generation_validation")))
+    output_root = _resolve(Path(paths.get("output_root", "data/derived/instruction_generation_validation")))
 
     sample_size = int(args.limit if args.limit is not None else judge_cfg.get("sample_size", 50))
     seed = int(judge_cfg.get("seed", 42))

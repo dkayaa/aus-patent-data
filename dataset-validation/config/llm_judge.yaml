@@ -2,9 +2,9 @@
 
 paths:
   # Read <task>/passed/ from Mode 1
-  input_root: data/interim/instruction_generation_validation
+  input_root: data/derived/instruction_generation_validation
   # Write <task>/llm_judge/{passed,rejected,report.json,done_ids.txt}
-  output_root: data/interim/instruction_generation_validation
+  output_root: data/derived/instruction_generation_validation
 
 llm:
   provider: openrouter

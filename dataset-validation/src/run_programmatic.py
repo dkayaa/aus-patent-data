@@ -172,9 +172,9 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_config(cfg_path)
 
     paths = cfg.get("paths") or {}
-    input_root = _resolve(Path(paths.get("input_root") or "data/interim/instruction_generation"))
+    input_root = _resolve(Path(paths.get("input_root") or "data/derived/instruction_generation"))
     output_root = _resolve(
-        Path(paths.get("output_root") or "data/interim/instruction_generation_validation")
+        Path(paths.get("output_root") or "data/derived/instruction_generation_validation")
     )
     run_cfg = cfg.get("run") or {}
     shard_size = int(run_cfg.get("shard_size") or 100)

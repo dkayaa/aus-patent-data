@@ -490,13 +490,13 @@ def main(argv: list[str] | None = None) -> int:
     infer = cfg.get("infer") or {}
 
     claims_csv = _resolve_path(
-        args.claims_csv or paths.get("claims_csv") or "data/interim/patent_search_text/claims.csv"
+        args.claims_csv or paths.get("claims_csv") or "data/derived/patent_search_text/claims.csv"
     )
     model_dir = _resolve_path(
         args.model_dir or paths.get("model_dir") or "classification/models/patentbert"
     )
     output_dir = _resolve_path(
-        args.output_dir or paths.get("output_dir") or "data/interim/patentbert"
+        args.output_dir or paths.get("output_dir") or "data/derived/patentbert"
     )
     use_gzip = bool(args.gzip or infer.get("gzip", False))
 

@@ -1,4 +1,4 @@
-"""JSONL / JSONL.GZ shard helpers for Patent Search interim storage."""
+"""JSONL / JSONL.GZ shard helpers for Patent Search derived storage."""
 
 from __future__ import annotations
 

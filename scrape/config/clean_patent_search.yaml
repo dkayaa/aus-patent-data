@@ -1,8 +1,8 @@
-# Reshape raw Patent Search interim JSONL.GZ → analysis-ready interim JSONL.GZ.
+# Reshape raw Patent Search derived JSONL.GZ → analysis-ready derived JSONL.GZ.
 
 paths:
   # Absolute or repo-relative. Created if missing (parents=True).
   # Expects part-*.jsonl.gz; writes mirrored part-*.jsonl.gz.
-  input_dir: data/interim/patent_search
-  output_dir: data/interim/patent_search_clean
+  input_dir: data/derived/patent_search
+  output_dir: data/derived/patent_search_clean
   # Also writes {output_dir}/summary.json (counts + claims_parse_failures).

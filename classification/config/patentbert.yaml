@@ -1,11 +1,11 @@
 # PatentBERT CPC-subclass multi-label inference (claim-level).
 
 paths:
-  claims_csv: data/interim/patent_search_text/first_claims.csv.gz
+  claims_csv: data/derived/patent_search_text/first_claims.csv.gz
   # Absolute or repo-relative. Checkpoint + labels + vocab/config (gitignored).
   model_dir: classification/models/patentbert
   # Absolute or repo-relative. Prepared TSV, row map, predictions.
-  output_dir: data/interim/patentbert
+  output_dir: data/derived/patentbert
 
 infer:
   # Sigmoid probability cutoff: keep CPC subclasses with score > threshold.

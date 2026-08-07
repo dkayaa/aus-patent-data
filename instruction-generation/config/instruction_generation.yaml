@@ -1,9 +1,9 @@
 # Synthetic instruction-tuning JSONL generation.
 
 paths:
-  patents_dir: data/interim/patent_search_clean
+  patents_dir: data/derived/patent_search_clean
   ipc_jsonl: data/ipc-codes/ipc_codes_20260101.jsonl
-  output_dir: data/interim/instruction_generation
+  output_dir: data/derived/instruction_generation
 
 llm:
   # local = OpenAI-compatible server (Ollama / llama.cpp / vLLM /v1)

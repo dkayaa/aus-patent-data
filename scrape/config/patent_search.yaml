@@ -19,7 +19,7 @@ paths:
   application_number_column: application_number
   # Absolute or repo-relative. Created if missing (parents=True).
   # Writes part-NNNNN.jsonl.gz shards + fetched_ids.txt (resume index).
-  output_dir: data/interim/patent_search
+  output_dir: data/derived/patent_search
 
 fetch:
   # Records per finalized part-NNNNN.jsonl.gz shard

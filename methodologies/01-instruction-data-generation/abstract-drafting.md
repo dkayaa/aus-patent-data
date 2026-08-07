@@ -13,7 +13,7 @@ Build a **cached pool of diverse instruction phrasings** so the fine-tune does n
 
 1. Send a meta-prompt to the generator LLM asking for N diverse, professional instructions that ask a patent attorney to summarize claims into an abstract (vary length and tone).
 2. Parse the JSON list of strings; repeat in batches until the pool reaches the configured size (default 40).
-3. Persist under `data/interim/instruction_generation/_pools/abstract_drafting.json`.
+3. Persist under `data/derived/instruction_generation/_pools/abstract_drafting.json`.
 4. For each patent example, **randomly sample one** pool string as `instruction`.
 
 This diversifies instruction wording for a fixed task (Self-Instruct-style). It is not full Evol-Instruct (no iterative evolution of a seed set). The LLM is **not** used to write the abstract — that remains the official gold abstract.
