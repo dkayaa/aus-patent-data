@@ -84,7 +84,11 @@ aus-patent-data/
 │   ├── src/
 │   ├── config/
 │   └── README.md
-├── methodologies/          # human-readable task / method notes (seed + evolved)
+├── dataset-validation/     # Mode 1 programmatic + Mode 2 LLM-as-a-judge
+│   ├── src/
+│   ├── config/
+│   └── README.md
+├── methodologies/          # numbered method notes (01 generation, 02 validation, …)
 ├── data/
 │   ├── raw/                # base dumps + (later) raw API payloads
 │   │   └── application-toy.csv
@@ -103,6 +107,7 @@ aus-patent-data/
 - Patent Search clean: `scrape/src/clean_patent_search.py` → mirrored `part-*.jsonl.gz` under `data/interim/patent_search_clean/`.
 - Classification: PatentBERT claim-level CPC-subclass inference (`classification/src/run_patentbert.py` → `data/interim/patentbert/`).
 - Instruction generation: synthetic SFT JSONL (`instruction-generation/` → `data/interim/instruction_generation/`).
+- Dataset validation: Mode 1 `scripts/validate_instruction_data.py`; Mode 2 sample judge `scripts/judge_instruction_data.py` → `data/interim/instruction_generation_validation/`.
 
 ## Reproduction (partial)
 

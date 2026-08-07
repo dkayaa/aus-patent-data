@@ -1,0 +1,22 @@
+# Mode 2 LLM-as-a-judge (sample of Mode 1 passed rows).
+
+paths:
+  # Read <task>/passed/ from Mode 1
+  input_root: data/interim/instruction_generation_validation
+  # Write <task>/llm_judge/{passed,rejected,report.json,done_ids.txt}
+  output_root: data/interim/instruction_generation_validation
+
+llm:
+  provider: openrouter
+  model: anthropic/claude-sonnet-4.6
+  temperature: 0
+  max_tokens: 512
+  timeout_s: 120
+  max_retries: 3
+
+judge:
+  sample_size: 50
+  pass_score_min: 4
+  seed: 42
+  truncate_chars: 12000
+  shard_size: 50

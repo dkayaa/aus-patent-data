@@ -8,6 +8,9 @@ Generate highly specific extractive questions and answers based directly on the 
 *   **Input:** Claims Text
 *   **Target:** Synthetic Factual Answer
 
+## Instruction pool
+This task does **not** use a shared instruction pool. Diversity comes from generating a **new question per patent**; that question is stored as `instruction`.
+
 ## Generation Workflow
 1.  **Extract:** Pull the `claimsText` from the IP Australia JSON payload.
 2.  **Prompt the Generator LLM:**

@@ -6,12 +6,13 @@ paths:
   output_dir: data/interim/instruction_generation
 
 llm:
-  # local = OpenAI-compatible server (llama.cpp / vLLM / Ollama /v1)
-  # openrouter = https://openrouter.ai/api/v1
+  # local = OpenAI-compatible server (Ollama / llama.cpp / vLLM /v1)
+  # openrouter = https://openrouter.ai/api/v1  (CLI: --provider openrouter)
   provider: local
-  model: llama3.1-8b
-  base_url: http://127.0.0.1:8080/v1
+  model: llama3.1:8b
+  base_url: http://127.0.0.1:11434/v1
   # Env var holding the API key. Local servers often accept any non-empty value.
+  # OpenRouter uses OPENROUTER_API_KEY when provider is switched.
   api_key_env: OPENAI_API_KEY
   temperature: 0.7
   max_tokens: 1024

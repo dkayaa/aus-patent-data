@@ -19,10 +19,11 @@ Work is organized by **pipeline stage**, not by language or framework. See also 
 | Enrich | `scrape/` | Call IP Australia (and related) APIs to fetch semantic text for known application numbers. Does not invent the application list. |
 | Label | `classification/` | Apply taxonomies, rules, or models. No API fetching of patent text. |
 | Instruction SFT | `instruction-generation/` | Build synthetic instruction-tuning JSONL from cleaned patents + IPC catalog via an LLM (local OpenAI-compatible server or OpenRouter). No IP Australia scraping; not taxonomy labeling. |
+| Dataset validation | `dataset-validation/` | Mode 1 programmatic checks + Mode 2 LLM-as-a-judge (sample of Mode 1 `passed/`). |
 
 ### Hard rules
 
-1. **Do not mix stages.** API clients and downloaders stay in `scrape/`. Labeling stays in `classification/`. Synthetic SFT generation stays in `instruction-generation/`.
+1. **Do not mix stages.** API clients and downloaders stay in `scrape/`. Labeling stays in `classification/`. Synthetic SFT generation stays in `instruction-generation/`. Validation scoring stays in `dataset-validation/`.
 2. **Scrape is enrichment, not discovery.** The application universe comes from IP Rapid (or a full dump later).
-3. **Pipeline direction:** `data/raw` → `scrape/` → `data/interim/patent_search_clean` → (`classification/` and/or `instruction-generation/`) → further `data/interim/` / `data/processed/`.
-4. Seed task methodology notes live under `methodologies/seed-instruction-data-generation/`; runnable generation code lives under `instruction-generation/`. Evolved-instruction methods can live alongside under `methodologies/` as they are added.
+3. **Pipeline direction:** `data/raw` → `scrape/` → `data/interim/patent_search_clean` → (`classification/` and/or `instruction-generation/` → `dataset-validation/`) → further `data/interim/` / `data/processed/`.
+4. Methodology notes live under `methodologies/` (e.g. `01-instruction-data-generation/`, `02-dataset-validation/`). Runnable generation: `instruction-generation/` + `scripts/generate_instruction_data.py`. Mode 1: `scripts/validate_instruction_data.py`. Mode 2 LLM-as-a-judge: `scripts/judge_instruction_data.py` (under `dataset-validation/`).

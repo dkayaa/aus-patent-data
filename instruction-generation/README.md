@@ -2,7 +2,7 @@
 
 Synthetic **instruction-tuning** JSONL from cleaned Australian patents and the WIPO IPC catalog. Peer stage to `classification/` (labeling); this stage does **not** scrape IP Australia.
 
-Seed task methodologies: `methodologies/seed-instruction-data-generation/`.
+Task methodologies: `methodologies/01-instruction-data-generation/`.
 
 ## Inputs
 
@@ -21,10 +21,10 @@ Alpaca-style records: `task`, `application_number`, `instruction`, `input`, `out
 
 | `--task` | Method |
 |----------|--------|
-| `legal_reasoning` | LLM justification of `primary_ipc` grounded in WIPO catalog |
-| `abstract_drafting` | Evol-Instruct instruction pool; claims → official abstract |
-| `patent_drafting` | Evol-Instruct instruction pool; abstract → claim 1 |
-| `mrc` | LLM extractive Q/A over claims |
+| `legal_reasoning` | Instruction pool + LLM justification of `primary_ipc` (skip if no WIPO definition) |
+| `abstract_drafting` | Instruction pool; claims → official abstract |
+| `patent_drafting` | Instruction pool; abstract → claim 1 |
+| `mrc` | LLM extractive Q/A over claims (no shared pool; question = instruction) |
 
 ## LLM providers
 
@@ -53,4 +53,4 @@ export OPENROUTER_API_KEY='...'
   --task mrc --provider openrouter --model meta-llama/llama-3.1-8b-instruct --limit 10
 ```
 
-Evol-Instruct pools are generated once per task and cached under `data/interim/instruction_generation/_pools/`.
+Instruction pools (diversified phrasings for a fixed task) are generated once per task and cached under `data/interim/instruction_generation/_pools/`. See `methodologies/01-instruction-data-generation/` for the full workflow.

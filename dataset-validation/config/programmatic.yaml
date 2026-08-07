@@ -1,0 +1,23 @@
+# Mode 1 programmatic validation (schema/IPC + lexical + semantic).
+
+paths:
+  # Root containing <task>/part-*.jsonl(.gz)
+  input_root: data/interim/instruction_generation
+  # Also accept plain jsonl under data/examples/...
+  output_root: data/interim/instruction_generation_validation
+
+semantic:
+  model_name: sentence-transformers/all-MiniLM-L6-v2
+  batch_size: 32
+  # Max sequence length for encode (model default 512).
+  max_seq_length: 512
+
+floors:
+  semantic_cosine_min: 0.15
+  rouge_l_f1_min: 0.02
+  mrc_token_f1_min: 0.1
+
+run:
+  shard_size: 100
+  # Cap records per task this run (null = all).
+  limit: null

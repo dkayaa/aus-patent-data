@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from patents import PatentText
 
 from .base import Task
+from .evol_pool import load_or_build_pool, sample_instruction
 
 SYSTEM_PROMPT = "You are an expert Australian Patent Examiner."
 
-USER_TEMPLATE = """Here is an Abstract, the Claims, and the assigned IPC Code with its WIPO definition. Write a 2-sentence technical justification explaining why this code is correct by mapping the claims to the definition.
+# Teacher prompt: used only to synthesize the justification (not the SFT instruction).
+JUSTIFICATION_USER_TEMPLATE = """Here is an Abstract, the Claims, and the assigned IPC Code with its WIPO definition. Write a 2-sentence technical justification explaining why this code is correct by mapping the claims to the definition.
 
 {ipc_block}
 
@@ -20,16 +23,37 @@ Abstract:
 Claims:
 {claims}
 
-Respond with the justification only (two sentences)."""
+Respond with the justification only (two sentences). Do not repeat the IPC code or use section headers."""
 
-INSTRUCTION = (
-    "Given the patent abstract and claims, justify the assigned IPC classification "
-    "with a brief technical explanation grounded in the WIPO definition."
+# Instruction diversification (same pattern as abstract/patent drafting pools).
+INSTRUCTION_POOL_PROMPT = (
+    "I am building an instruction-tuning dataset for patent IPC classification "
+    "reasoning. Generate 5 diverse, professional instructions that ask a model to "
+    "justify why a patent's abstract and claims belong under an assigned IPC code, "
+    "using technical mapping to the classification place. Vary length, tone, and "
+    "framing (e.g. examiner memo, attorney note, brief rationale, classification "
+    "review). Do not mention specific IPC codes or invent patent facts. "
+    "Output only a JSON list of strings."
 )
 
 
 class LegalReasoningTask(Task):
     task_id = "legal_reasoning"
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._pool: list[str] = []
+
+    def setup(self) -> None:
+        pools_dir = Path(self.pools_dir) if self.pools_dir else Path(".")
+        self._pool = load_or_build_pool(
+            client=self.client,
+            pools_dir=pools_dir,
+            pool_name="legal_reasoning",
+            user_prompt=INSTRUCTION_POOL_PROMPT,
+            pool_size=int(self.evol_cfg.get("pool_size", 40)),
+            batch_size=int(self.evol_cfg.get("batch_size", 5)),
+        )
 
     def generate(self, patent: PatentText) -> dict[str, Any] | None:
         if not patent.primary_ipc:
@@ -42,7 +66,11 @@ class LegalReasoningTask(Task):
         if entry is None or not entry.definition_statement:
             return None
 
-        user = USER_TEMPLATE.format(
+        if not self._pool:
+            self.setup()
+        instruction = sample_instruction(self._pool)
+
+        user = JUSTIFICATION_USER_TEMPLATE.format(
             ipc_block=entry.grounding_text(),
             abstract=patent.abstract,
             claims=patent.claims_text,
@@ -60,7 +88,7 @@ class LegalReasoningTask(Task):
         input_text = f"Abstract:\n{patent.abstract}\n\nClaims:\n{patent.claims_text}"
         return self._record(
             patent,
-            instruction=INSTRUCTION,
+            instruction=instruction,
             input_text=input_text,
             output_text=output,
             ipc_title=entry.title,

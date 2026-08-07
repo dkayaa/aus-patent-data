@@ -27,28 +27,59 @@ class LLMConfig:
 
 
 def llm_config_from_dict(raw: dict[str, Any], *, overrides: dict[str, Any] | None = None) -> LLMConfig:
-    data = dict(raw)
-    if overrides:
-        data.update({k: v for k, v in overrides.items() if v is not None})
+    """Build LLM config.
 
-    provider = str(data.get("provider") or "local").strip().lower()
-    if provider == "openrouter":
-        base_url = str(data.get("base_url") or OPENROUTER_BASE_URL)
-        api_key_env = str(data.get("api_key_env") or OPENROUTER_API_KEY_ENV)
-    else:
+    When ``provider`` is switched via CLI (e.g. YAML ``local`` → ``--provider
+    openrouter``), do not keep the YAML local ``base_url`` / ``api_key_env`` —
+    fall back to that provider's defaults unless those fields were also
+    overridden explicitly.
+    """
+    ov = {k: v for k, v in (overrides or {}).items() if v is not None}
+    raw_provider = str(raw.get("provider") or "local").strip().lower()
+    provider = str(ov.get("provider") or raw_provider).strip().lower()
+    if provider != "openrouter":
         provider = "local"
-        base_url = str(data.get("base_url") or "http://127.0.0.1:8080/v1")
-        api_key_env = str(data.get("api_key_env") or "OPENAI_API_KEY")
 
+    if provider == "openrouter":
+        default_base = OPENROUTER_BASE_URL
+        default_key_env = OPENROUTER_API_KEY_ENV
+        default_model = "anthropic/claude-sonnet-4.6"
+    else:
+        default_base = "http://127.0.0.1:11434/v1"
+        default_key_env = "OPENAI_API_KEY"
+        default_model = "llama3.1:8b"
+
+    provider_unchanged = raw_provider == provider
+    if "base_url" in ov:
+        base_url = str(ov["base_url"])
+    elif provider_unchanged and raw.get("base_url"):
+        base_url = str(raw["base_url"])
+    else:
+        base_url = default_base
+
+    if "api_key_env" in ov:
+        api_key_env = str(ov["api_key_env"])
+    elif provider_unchanged and raw.get("api_key_env"):
+        api_key_env = str(raw["api_key_env"])
+    else:
+        api_key_env = default_key_env
+
+    model = str(ov.get("model") or raw.get("model") or default_model)
+    # If switching provider and model still looks like the other side's default, replace.
+    if not ov.get("model") and not provider_unchanged:
+        model = default_model
+
+    merged = dict(raw)
+    merged.update(ov)
     return LLMConfig(
         provider=provider,
-        model=str(data.get("model") or "llama3.1-8b"),
+        model=model,
         base_url=base_url.rstrip("/"),
         api_key_env=api_key_env,
-        temperature=float(data.get("temperature", 0.7)),
-        max_tokens=int(data.get("max_tokens", 1024)),
-        timeout_s=float(data.get("timeout_s", 120)),
-        max_retries=int(data.get("max_retries", 3)),
+        temperature=float(merged.get("temperature", 0.7)),
+        max_tokens=int(merged.get("max_tokens", 1024)),
+        timeout_s=float(merged.get("timeout_s", 120)),
+        max_retries=int(merged.get("max_retries", 3)),
     )
 
 
