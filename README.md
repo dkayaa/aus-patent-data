@@ -7,7 +7,8 @@ Research repository for constructing an Australian patent dataset. This repo is 
 1. **Base identifiers** — start from an IP Rapid / data.gov application dump (toy sample checked in under `data/raw/`).
 2. **Scrape** — use those application numbers to fetch **semantic textual data** from the IP Australia API into `data/`.
 3. **Classification** — label / categorize the enriched records.
-4. **Release artifacts** — final tables under `data/processed/`.
+4. **Instruction generation** — synthesize instruction-tuning JSONL from cleaned patents (optional peer stage).
+5. **Release artifacts** — final tables under `data/processed/`.
 
 ## For Cursor agents
 
@@ -22,16 +23,17 @@ Work is organized by **pipeline stage**, not by language or framework:
 | Base + artifacts | `data/` | Seed dumps (`raw/`), scrape outputs, interim joins, final dataset. |
 | Enrich | `scrape/` | Call IP Australia (and related) APIs to fetch semantic text for known application numbers. Does not invent the application list. |
 | Label | `classification/` | Apply taxonomies, rules, or models. No API fetching of patent text. |
+| Instruction SFT | `instruction-generation/` | Synthetic instruction-tuning JSONL from cleaned patents + IPC catalog via LLM (local or OpenRouter). |
 
 ### Hard rules
 
-1. **Do not mix stages.** API clients and downloaders stay in `scrape/`. Labeling stays in `classification/`.
+1. **Do not mix stages.** API clients and downloaders stay in `scrape/`. Labeling stays in `classification/`. Synthetic SFT generation stays in `instruction-generation/`.
 2. **Scrape is enrichment, not discovery.** The application universe comes from IP Rapid (or a full dump later). Scrapers take `application_number` (and related IDs) from `data/raw/` and fetch text/metadata from IP Australia.
-3. **Pipeline direction:** `data/raw` (base) → `scrape/` → enriched artifacts in `data/` → `classification/` → `data/interim/` / `data/processed/`.
+3. **Pipeline direction:** `data/raw` (base) → `scrape/` → enriched artifacts in `data/` → (`classification/` and/or `instruction-generation/`) → `data/interim/` / `data/processed/`.
 4. **Toy vs bulk via Git LFS.** Dataset files under `data/` (`*.csv`, `*.json`, archives, etc.) are tracked with **Git LFS** (see `.gitattributes`). Pointers live in git; blobs live in LFS storage. Install with `git lfs install` before cloning/pulling data.
 5. **Prefer importable modules over notebooks** for anything that must be reproducible for the paper.
 6. **Document sources and regeneration** in each stage README (what is read, what is written, how to run).
-7. **Paper alignment.** Prefer names that map to methods: base dump, API enrichment, labeling, dataset release.
+7. **Paper alignment.** Prefer names that map to methods: base dump, API enrichment, labeling, instruction generation, dataset release.
 
 ### Where to put new work
 
@@ -41,6 +43,7 @@ Work is organized by **pipeline stage**, not by language or framework:
 | Documenting or placing a new base dump / toy sample | `data/raw/` + update `data/README.md` |
 | Defining or changing labels / taxonomy | `classification/schemas/` |
 | Implementing labeling logic or models | `classification/src/` |
+| Building synthetic instruction-tuning data | `instruction-generation/src/`, config in `instruction-generation/config/` |
 | Writing pipeline glue / one-shot runners | `scripts/` |
 | Changing project-wide deps | root `pyproject.toml` / `requirements.txt` (when added) |
 
@@ -50,10 +53,10 @@ Work is organized by **pipeline stage**, not by language or framework:
 data/raw/application-toy.csv   (IP Rapid seed: IDs + status/dates)
             │
             ▼
-         scrape/   ── IP Australia API: semantic / textual fields ──►  data/raw/ or data/interim/
+         scrape/   ── IP Australia API: semantic / textual fields ──►  data/interim/
             │
-            ▼
-    classification/  ── labels ──►  data/interim/  ──►  data/processed/
+            ├─► classification/          ── labels / models ──► data/interim/
+            └─► instruction-generation/ ── synthetic SFT JSONL ──► data/interim/instruction_generation/
 ```
 
 Each stage should use **explicit paths** (config or CLI args).
@@ -61,7 +64,7 @@ Each stage should use **explicit paths** (config or CLI args).
 ### Out of scope (for now)
 
 - Treating scrape as “download the whole IP Rapid dump” (that dump is the *input*; API text is the scrape target).
-- Mixing scrape + classification into a single `src/` tree.
+- Mixing scrape + classification + instruction-generation into a single `src/` tree.
 - Committing large dataset files as normal git blobs (use Git LFS patterns in `.gitattributes` instead).
 
 ## Repository layout
@@ -77,6 +80,11 @@ aus-patent-data/
 │   ├── schemas/
 │   ├── models/
 │   └── README.md
+├── instruction-generation/ # synthetic instruction-tuning JSONL
+│   ├── src/
+│   ├── config/
+│   └── README.md
+├── methodologies/          # human-readable task / method notes (seed + evolved)
 ├── data/
 │   ├── raw/                # base dumps + (later) raw API payloads
 │   │   └── application-toy.csv
@@ -94,6 +102,7 @@ aus-patent-data/
 - Patent Search API enrichment: `scrape/src/patent_search.py` → `part-*.jsonl.gz` shards under the configured `patent_search` output dir.
 - Patent Search clean: `scrape/src/clean_patent_search.py` → mirrored `part-*.jsonl.gz` under `data/interim/patent_search_clean/`.
 - Classification: PatentBERT claim-level CPC-subclass inference (`classification/src/run_patentbert.py` → `data/interim/patentbert/`).
+- Instruction generation: synthetic SFT JSONL (`instruction-generation/` → `data/interim/instruction_generation/`).
 
 ## Reproduction (partial)
 
@@ -111,6 +120,9 @@ python scripts/export_patent_text_csvs.py
 pip install -r classification/requirements-patentbert.txt
 python scripts/download_patentbert.py
 python scripts/run_patentbert.py
+
+# Instruction-tuning JSONL (local Llama OpenAI-compatible server by default).
+python scripts/generate_instruction_data.py --task legal_reasoning --limit 20
 ```
 
-See `scrape/README.md` for config (client credentials → JWT, `max_responses`, backoff) and idempotent re-runs. See `classification/README.md` for PatentBERT.
+See `scrape/README.md` for config (client credentials → JWT, `max_responses`, backoff) and idempotent re-runs. See `classification/README.md` for PatentBERT. See `instruction-generation/README.md` for LLM provider swap (local / OpenRouter).

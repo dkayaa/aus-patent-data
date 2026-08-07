@@ -1,3 +1,4 @@
 PyYAML>=6.0
 matplotlib>=3.8
 transformers>=4.40
+openai>=1.40.0
