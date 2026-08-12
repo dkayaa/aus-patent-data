@@ -23,7 +23,7 @@ Alpaca-style records: `task`, `application_number`, `instruction`, `input`, `out
 |----------|--------|
 | `ipc_reasoning` | Instruction pool + LLM justification of `primary_ipc` (skip if no WIPO definition) |
 | `abstract_drafting` | Instruction pool; claims → official abstract |
-| `mrc` | LLM extractive Q/A over claims (no shared pool; question = instruction) |
+| `mrc` | Instruction pool + LLM extractive Q/A over claims (question embedded in `input`) |
 
 ## LLM providers
 

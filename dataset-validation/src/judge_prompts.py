@@ -37,8 +37,9 @@ High score: instruction asks to summarize/draft an abstract; input looks like cl
 Low score: instruction/input/output misaligned, truncated nonsense, or abstract clearly about a different invention than the claims.
 Set pass=true only if usable for SFT (typically score >= 4).""",
     "mrc": """Task: mrc (extractive QA over claims).
-High score: the question is answerable from the claims alone; the answer is supported by an explicit span or clear paraphrase of claim text; no speculation outside the claims.
-Low score: unanswerable from claims, hallucinated numbers/entities, or answer contradicts claims.
+The instruction is a task directive (answer from claims only). The input embeds Question + Claims.
+High score: the question is answerable from the claims alone; the answer is supported by an explicit span or clear paraphrase of claim text; no speculation outside the claims; fields are correctly arranged (directive vs question vs claims).
+Low score: unanswerable from claims, hallucinated numbers/entities, answer contradicts claims, or question wrongly placed in instruction instead of input.
 Set pass=true only if usable for SFT (typically score >= 4).""",
 }
 

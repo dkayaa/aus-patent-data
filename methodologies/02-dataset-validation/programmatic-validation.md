@@ -30,7 +30,7 @@ Per record:
 
 ### Light task checks
 * **abstract_drafting:** length sanity vs input
-* **mrc:** instruction contains `?`; answer shorter than claims
+* **mrc:** `input` is `Question: …\n\nClaims: …`; question contains `?`; answer shorter than claims
 
 ## Lexical scores
 
@@ -38,7 +38,7 @@ Per record:
 |------|--------|------|
 | `ipc_reasoning` | ROUGE-L F1 | Justification body vs `input` |
 | `abstract_drafting` | ROUGE-L F1 | abstract (`output`) vs claims (`input`) |
-| `mrc` | Token-F1 + answer **containment** in claims | answer vs claims |
+| `mrc` | Token-F1 + answer **containment** in claims | answer vs claims (claims parsed from `input`) |
 
 Also record: `len_input_tokens`, `len_output_tokens`, `compression_ratio = len_out / len_in`.
 

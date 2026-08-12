@@ -44,7 +44,6 @@ def check_task_light(record: dict[str, Any]) -> list[str]:
     failures: list[str] = []
     task = str(record.get("task") or "")
     output = str(record.get("output") or "")
-    instruction = str(record.get("instruction") or "")
     input_text = str(record.get("input") or "")
 
     if task == "abstract_drafting":
@@ -52,12 +51,34 @@ def check_task_light(record: dict[str, Any]) -> list[str]:
             failures.append("output_too_long_vs_input")
 
     if task == "mrc":
-        if "?" not in instruction:
-            failures.append("mrc_instruction_not_question")
-        if len(output.strip()) >= len(input_text.strip()):
-            failures.append("mrc_answer_not_shorter_than_claims")
+        question, claims = parse_mrc_input(input_text)
+        if question is None or claims is None:
+            failures.append("mrc_input_format_invalid")
+        else:
+            if "?" not in question:
+                failures.append("mrc_question_missing")
+            if len(output.strip()) >= len(claims.strip()):
+                failures.append("mrc_answer_not_shorter_than_claims")
 
     return failures
+
+
+_MRC_INPUT_RE = re.compile(
+    r"^Question:\s*(?P<question>.+?)\n\nClaims:\s*\n(?P<claims>.+)$",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def parse_mrc_input(input_text: str) -> tuple[str | None, str | None]:
+    """Return (question, claims) from MRC ``input``, or (None, None)."""
+    m = _MRC_INPUT_RE.match((input_text or "").strip())
+    if not m:
+        return None, None
+    question = m.group("question").strip()
+    claims = m.group("claims").strip()
+    if not question or not claims:
+        return None, None
+    return question, claims
 
 
 def simple_tokenize(text: str) -> list[str]:

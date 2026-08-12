@@ -6,7 +6,7 @@ from typing import Any
 
 from ipc_checks import check_ipc_reasoning, parse_ipc_output
 from lexical import answer_contained, rouge_l_f1, token_f1
-from schema import check_schema, check_task_light, simple_tokenize
+from schema import check_schema, check_task_light, parse_mrc_input, simple_tokenize
 from semantic import SemanticScorer
 
 TASKS = (
@@ -28,7 +28,12 @@ def text_pair(record: dict[str, Any]) -> tuple[str, str] | None:
             return None
         return input_text, body
 
-    if task in {"abstract_drafting", "mrc"}:
+    if task == "mrc":
+        _, claims = parse_mrc_input(input_text)
+        # Score answer against claims only (ignore the embedded question).
+        return (claims or input_text), output
+
+    if task == "abstract_drafting":
         return input_text, output
 
     return None
