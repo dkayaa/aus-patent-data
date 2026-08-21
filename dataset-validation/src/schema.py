@@ -50,6 +50,11 @@ def check_task_light(record: dict[str, Any]) -> list[str]:
         if len(output) > max(len(input_text) * 2, 50_000):
             failures.append("output_too_long_vs_input")
 
+    if task == "ipc_reasoning":
+        abstract, claims = parse_ipc_input(input_text)
+        if abstract is None or claims is None:
+            failures.append("ipc_input_format_invalid")
+
     if task == "mrc":
         question, claims = parse_mrc_input(input_text)
         if question is None or claims is None:
@@ -67,6 +72,10 @@ _MRC_INPUT_RE = re.compile(
     r"^Question:\s*(?P<question>.+?)\n\nClaims:\s*\n(?P<claims>.+)$",
     re.DOTALL | re.IGNORECASE,
 )
+_IPC_INPUT_RE = re.compile(
+    r"^Abstract:\s*(?P<abstract>.+?)\n\nClaims:\s*\n?(?P<claims>.+)$",
+    re.DOTALL | re.IGNORECASE,
+)
 
 
 def parse_mrc_input(input_text: str) -> tuple[str | None, str | None]:
@@ -79,6 +88,18 @@ def parse_mrc_input(input_text: str) -> tuple[str | None, str | None]:
     if not question or not claims:
         return None, None
     return question, claims
+
+
+def parse_ipc_input(input_text: str) -> tuple[str | None, str | None]:
+    """Return (abstract, claims) from ipc_reasoning ``input``, or (None, None)."""
+    m = _IPC_INPUT_RE.match((input_text or "").strip())
+    if not m:
+        return None, None
+    abstract = m.group("abstract").strip()
+    claims = m.group("claims").strip()
+    if not abstract or not claims:
+        return None, None
+    return abstract, claims
 
 
 def simple_tokenize(text: str) -> list[str]:

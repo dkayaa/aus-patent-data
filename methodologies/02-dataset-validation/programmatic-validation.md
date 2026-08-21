@@ -26,7 +26,9 @@ Per record:
 1. `meta.primary_ipc` matches `IPC_RE`
 2. `output` parses as `Classification: <code>\nJustification: <body>`
 3. Classification code == `meta.primary_ipc` (normalized)
-4. Any other `IPC_RE` matches inside the justification body must equal the primary code (strict)
+4. IPC-shaped tokens in the justification must be the primary code **or a coarser ancestor** of it (subclass `G05D` vs `G05D1/00`, parent subgroup `C12Q1/68` vs `C12Q1/6876`). Unrelated or sibling symbols fail `conflicting_ipc_in_justification`.
+5. `primary_ipc` has a WIPO `definition_statement` in the catalog (`data/ipc-codes/ipc_codes_20260101.jsonl`); otherwise `wipo_definition_missing`
+6. `input` parses as `Abstract: …\n\nClaims: …`
 
 ### Light task checks
 * **abstract_drafting:** length sanity vs input
@@ -36,7 +38,7 @@ Per record:
 
 | Task | Metric | Pair |
 |------|--------|------|
-| `ipc_reasoning` | ROUGE-L F1 | Justification body vs `input` |
+| `ipc_reasoning` | ROUGE-L F1 | Justification vs WIPO title + definition (floor + copy ceiling). Claims-side ROUGE is recorded, not a fail rule. |
 | `abstract_drafting` | ROUGE-L F1 | abstract (`output`) vs claims (`input`) |
 | `mrc` | Best-span token-F1 | answer vs sliding windows of claims; verbatim containment short-circuits to 1.0 |
 
@@ -48,10 +50,10 @@ Library: `rouge-score` (ROUGE-L F1).
 
 | Task | Pair |
 |------|------|
-| `ipc_reasoning` | Justification vs `input` |
+| `ipc_reasoning` | Justification vs WIPO title + definition **and** vs claims |
 | `abstract_drafting` | abstract vs claims |
 
-Not computed for `mrc` (short extractive answers vs the full claim set are a weak quality signal).
+Not computed for `mrc` (short extractive answers vs the full claim set are a weak quality signal). IPC uses two cosine pairs: WIPO grounding (is the rationale about the assigned place) and claims (is it about this invention). A justification that is mostly the WIPO text (ROUGE-L vs title+definition `> 0.60`) fails as a near-copy.
 
 * **Model:** `nomic-ai/nomic-embed-text-v1.5` (8,192-token context; document prefix `search_document:` on both sides)
 * **Score:** cosine similarity of mean-pooled embeddings
@@ -59,8 +61,8 @@ Not computed for `mrc` (short extractive answers vs the full claim set are a wea
 
 ## Soft floors (quarantine)
 Fail only if:
-* semantic cosine `< 0.15` (IPC reasoning / abstract drafting only), or
-* ROUGE-L F1 `< 0.02` (IPC reasoning / abstract drafting), or
+* IPC reasoning: WIPO cosine `< 0.55` or WIPO ROUGE-L F1 `< 0.08` or `> 0.60` (near-copy), or claims cosine `< 0.50`, or
+* abstract drafting: semantic cosine `< 0.15` or ROUGE-L F1 `< 0.02`, or
 * MRC: best-span token-F1 `< 0.5`
 
 Borderline scores remain in the pass set with `meta.validation` filled in.

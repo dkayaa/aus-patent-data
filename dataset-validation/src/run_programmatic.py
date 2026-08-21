@@ -27,6 +27,7 @@ if str(IG_SRC) not in sys.path:
     sys.path.insert(0, str(IG_SRC))
 
 from holdings import resolve_generator_dir  # noqa: E402
+from ipc_lookup import IPCLookup  # noqa: E402
 
 DEFAULT_CONFIG = REPO_ROOT / "dataset-validation" / "config" / "programmatic.yaml"
 
@@ -99,6 +100,7 @@ def validate_task(
     output_dir: Path,
     floors: dict[str, float],
     semantic: SemanticScorer | None,
+    ipc_lookup: Any | None,
     shard_size: int,
     limit: int | None,
 ) -> dict[str, Any]:
@@ -112,6 +114,8 @@ def validate_task(
     rouge_vals: list[float] = []
     cos_vals: list[float] = []
     best_span_vals: list[float] = []
+    claims_cos_vals: list[float] = []
+    claims_rouge_vals: list[float] = []
     n_total = 0
     n_pass = 0
     n_reject = 0
@@ -124,7 +128,9 @@ def validate_task(
             record = {**record, "task": task_id}
         n_total += 1
 
-        validation = score_record(record, semantic=semantic, floors=floors)
+        validation = score_record(
+            record, semantic=semantic, floors=floors, ipc_lookup=ipc_lookup
+        )
         meta = dict(record.get("meta") or {})
         meta["validation"] = validation
         out_rec = {**record, "meta": meta}
@@ -136,6 +142,10 @@ def validate_task(
             cos_vals.append(float(scores["semantic_cosine"]))
         if scores.get("best_span_f1") is not None:
             best_span_vals.append(float(scores["best_span_f1"]))
+        if scores.get("claims_semantic_cosine") is not None:
+            claims_cos_vals.append(float(scores["claims_semantic_cosine"]))
+        if scores.get("claims_rouge_l_f1") is not None:
+            claims_rouge_vals.append(float(scores["claims_rouge_l_f1"]))
 
         if validation["passed"]:
             passed_writer.add(out_rec)
@@ -161,6 +171,8 @@ def validate_task(
         "mean_rouge_l_f1": _mean(rouge_vals),
         "mean_semantic_cosine": _mean(cos_vals),
         "mean_best_span_f1": _mean(best_span_vals),
+        "mean_claims_semantic_cosine": _mean(claims_cos_vals),
+        "mean_claims_rouge_l_f1": _mean(claims_rouge_vals),
         "passed_shards": [str(p) for p in passed_writer.paths],
         "rejected_shards": [str(p) for p in rejected_writer.paths],
     }
@@ -196,12 +208,15 @@ def main(argv: list[str] | None = None) -> int:
     if limit is not None:
         limit = int(limit)
 
+    floor_cfg = cfg.get("floors") or {}
     floors = {
-        "semantic_cosine_min": float((cfg.get("floors") or {}).get("semantic_cosine_min", 0.15)),
-        "rouge_l_f1_min": float((cfg.get("floors") or {}).get("rouge_l_f1_min", 0.02)),
-        "mrc_best_span_f1_min": float(
-            (cfg.get("floors") or {}).get("mrc_best_span_f1_min", 0.5)
-        ),
+        "semantic_cosine_min": float(floor_cfg.get("semantic_cosine_min", 0.15)),
+        "rouge_l_f1_min": float(floor_cfg.get("rouge_l_f1_min", 0.02)),
+        "mrc_best_span_f1_min": float(floor_cfg.get("mrc_best_span_f1_min", 0.5)),
+        "ipc_wipo_cosine_min": float(floor_cfg.get("ipc_wipo_cosine_min", 0.55)),
+        "ipc_wipo_rouge_l_f1_min": float(floor_cfg.get("ipc_wipo_rouge_l_f1_min", 0.08)),
+        "ipc_wipo_rouge_l_f1_max": float(floor_cfg.get("ipc_wipo_rouge_l_f1_max", 0.60)),
+        "ipc_claims_cosine_min": float(floor_cfg.get("ipc_claims_cosine_min", 0.50)),
     }
 
     if args.input_dir is not None or args.output_dir is not None:
@@ -229,6 +244,17 @@ def main(argv: list[str] | None = None) -> int:
             prefix_b=str(sem_cfg.get("prefix_b") or "search_document: "),
             trust_remote_code=bool(sem_cfg.get("trust_remote_code", True)),
         )
+
+    ipc_lookup: Any | None = None
+    if any(tid == "ipc_reasoning" for tid in task_ids):
+        ipc_jsonl = _resolve(
+            Path(paths.get("ipc_jsonl") or "data/ipc-codes/ipc_codes_20260101.jsonl")
+        )
+        if not ipc_jsonl.is_file():
+            print(f"error: IPC catalog not found: {ipc_jsonl}", file=sys.stderr)
+            return 1
+        ipc_lookup = IPCLookup.from_jsonl(ipc_jsonl)
+        print(f"IPC catalog: {len(ipc_lookup)} entries from {ipc_jsonl}", flush=True)
 
     gen_in: Path | None = None
     gen_out: Path | None = None
@@ -263,6 +289,7 @@ def main(argv: list[str] | None = None) -> int:
                 output_dir=out_dir,
                 floors=floors,
                 semantic=semantic,
+                ipc_lookup=ipc_lookup,
                 shard_size=shard_size,
                 limit=limit,
             )

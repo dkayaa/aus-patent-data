@@ -15,6 +15,9 @@ OUTPUT_RE = re.compile(
     r"Classification:\s*(?P<code>\S+)\s*\nJustification:\s*(?P<body>.+)",
     re.DOTALL | re.IGNORECASE,
 )
+_IPC_PARTS_RE = re.compile(
+    r"^([A-H])([0-9]{2})([A-Z])(?:([0-9]{1,4})(?:/([0-9]{2,6}))?)?$"
+)
 
 
 def normalize_ipc(code: str) -> str:
@@ -26,6 +29,58 @@ def parse_ipc_output(output: str) -> tuple[str | None, str | None]:
     if not m:
         return None, None
     return normalize_ipc(m.group("code")), m.group("body").strip()
+
+
+def parse_ipc_symbol(
+    code: str,
+) -> tuple[str, str, str, int | None, str | None] | None:
+    """Return (section, class, subclass, group, subgroup) or None."""
+    m = _IPC_PARTS_RE.match(normalize_ipc(code))
+    if not m:
+        return None
+    section, cls, subclass, group, subgroup = m.groups()
+    group_i = int(group) if group is not None else None
+    return section, cls, subclass, group_i, subgroup
+
+
+def is_same_place_or_ancestor(found: str, primary: str) -> bool:
+    """True if ``found`` is ``primary`` or a coarser place that contains it.
+
+    Allows subclass/group mentions of the gold symbol (e.g. G05D vs G05D1/00,
+    C12Q1/68 vs C12Q1/6876). Sibling or unrelated symbols return False.
+    """
+    fp = parse_ipc_symbol(found)
+    pp = parse_ipc_symbol(primary)
+    if fp is None or pp is None:
+        return False
+    if fp[0] != pp[0] or fp[1] != pp[1] or fp[2] != pp[2]:
+        return False
+    if fp[3] is None:
+        return True
+    if pp[3] is None or fp[3] != pp[3]:
+        return False
+    if fp[4] is None:
+        return True
+    prim_sg = pp[4] or ""
+    found_sg = fp[4]
+    return prim_sg == found_sg or prim_sg.startswith(found_sg)
+
+
+def wipo_grounding_text(entry: Any | None) -> str:
+    """Title plus definition (or scheme note) for Mode 1 pairing."""
+    if entry is None:
+        return ""
+    title = str(getattr(entry, "title", "") or "").strip()
+    definition = str(getattr(entry, "definition_statement", "") or "").strip()
+    note = str(getattr(entry, "scheme_note", "") or "").strip()
+    parts: list[str] = []
+    if title:
+        parts.append(title)
+    if definition:
+        parts.append(definition)
+    elif note:
+        parts.append(note)
+    return "\n".join(parts)
 
 
 def check_ipc_reasoning(record: dict[str, Any]) -> tuple[list[str], str | None]:
@@ -52,8 +107,9 @@ def check_ipc_reasoning(record: dict[str, Any]) -> tuple[list[str], str | None]:
 
     for found in IPC_FIND_RE.findall(body):
         norm = normalize_ipc(found)
-        if primary and norm != primary:
-            failures.append("conflicting_ipc_in_justification")
-            break
+        if not primary or is_same_place_or_ancestor(norm, primary):
+            continue
+        failures.append("conflicting_ipc_in_justification")
+        break
 
     return failures, body
