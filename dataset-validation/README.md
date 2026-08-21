@@ -57,7 +57,7 @@ set -a && source .env && set +a
 # Re-grade a frozen ID list (calibration sample; skips seed shuffle)
 .venv/bin/python scripts/judge_instruction_data.py --task ipc_reasoning \
   --generator meta-llama/llama-3.3-70b-instruct \
-  --ids-file data/derived/instruction_generation_validation/meta-llama-llama-3.3-70b-instruct/ipc_reasoning/llm_judge_v0/done_ids.txt \
+  --ids-file data/derived/instruction_generation_validation/meta-llama-llama-3.3-70b-instruct/ipc_reasoning/llm_judge/done_ids.txt \
   --workers 12
 ```
 
@@ -69,7 +69,6 @@ Requires `OPENROUTER_API_KEY` in the environment (load `.env` as above). `--gene
 | `llm_judge/rejected/` | failed grades |
 | `llm_judge/report.json` | n_judged, mean score, pass rate, closed-set failure tags |
 | `llm_judge/done_ids.txt` | resume / pinned sample set |
-| `llm_judge_v0/` | archived pre-protocol grades (untouched) |
 
 Config: [`config/llm_judge.yaml`](config/llm_judge.yaml). Rubrics: [`src/judge_prompts.py`](src/judge_prompts.py).
 

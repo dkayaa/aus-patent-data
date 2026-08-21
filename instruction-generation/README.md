@@ -58,4 +58,4 @@ export OPENROUTER_API_KEY='...'
   --provider openrouter --model meta-llama/llama-3.3-70b-instruct --workers 12 --temperature 0.0
 ```
 
-Instruction pools (diversified phrasings for a fixed task) are generated once per task and cached under `data/derived/instruction_generation/_pools/`. Reused across generators so smoke tests are comparable. See `methodologies/01-instruction-data-generation/` for the full workflow.
+Instruction pools (diversified phrasings for a fixed task) are generated once per task and cached under `data/derived/instruction_generation/_pools/`. Reused across generators so smoke tests are comparable. Rebuild one task's pool with `--rebuild-pool` (requires `--task`; overwrites `_pools/<task>.json`). See `methodologies/01-instruction-data-generation/` for the full workflow.

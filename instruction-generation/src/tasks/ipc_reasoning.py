@@ -13,7 +13,9 @@ from .evol_pool import load_or_build_pool, sample_instruction
 SYSTEM_PROMPT = "You are an expert Australian Patent Examiner."
 
 # Teacher prompt: used only to synthesize the justification (not the SFT instruction).
-JUSTIFICATION_USER_TEMPLATE = """Here is an Abstract, the Claims, and the assigned IPC Code with its WIPO definition. Write a 2-sentence technical justification explaining why this code is correct by mapping the claims to the definition.
+JUSTIFICATION_USER_TEMPLATE = """The assigned IPC code is GOLD. Do not propose a different code.
+
+Here is the official WIPO catalog text for that code, plus the patent abstract and claims. Write a short technical justification that maps this invention to that fixed place.
 
 {ipc_block}
 
@@ -23,16 +25,26 @@ Abstract:
 Claims:
 {claims}
 
-Respond with the justification only (two sentences). Do not repeat the IPC code or use section headers."""
+Requirements:
+- One sentence stating what independent claim 1 actually is (concrete features, not the IPC title).
+- Then 3–5 sentences, each tying a named claim feature to a clause of the WIPO definition above. Quote or tightly paraphrase that catalog text; do not invent definitional scope.
+- Use only the provided definition. Do not mention other IPC codes. Do not start with "The assigned code is correct because".
+- Justification only: no Classification line, no headings, no bullet list. Target about 120–220 words."""
 
 # Instruction diversification (same pattern as abstract drafting pools).
+# Pool wordings must match the teacher target: one paragraph, claim→definition
+# mapping, no re-classification, no multi-section examiner memos.
 INSTRUCTION_POOL_PROMPT = (
     "I am building an instruction-tuning dataset for patent IPC classification "
     "reasoning. Generate 5 diverse, professional instructions that ask a model to "
-    "justify why a patent's abstract and claims belong under an assigned IPC code, "
-    "using technical mapping to the classification place. Vary length, tone, and "
-    "framing (e.g. examiner memo, attorney note, brief rationale, classification "
-    "review). Do not mention specific IPC codes or invent patent facts. "
+    "write a short paragraph (about 4–8 sentences) justifying an already-assigned "
+    "IPC code by mapping independent-claim features to that classification place. "
+    "Vary length, tone, and framing (examiner note, attorney file note, brief "
+    "rationale, classification log). All variants must: treat the assigned code as "
+    "given (do not ask to re-classify, pick a better code, or discuss adjacent "
+    "places); ask for claim-feature to definition mapping; and must NOT request "
+    "multi-section memoranda, hierarchical walk-downs, confidence scores, or "
+    "labeled subsections. Do not mention specific IPC codes or invent patent facts. "
     "Output only a JSON list of strings."
 )
 
@@ -53,6 +65,7 @@ class IPCReasoningTask(Task):
             user_prompt=INSTRUCTION_POOL_PROMPT,
             pool_size=int(self.evol_cfg.get("pool_size", 40)),
             batch_size=int(self.evol_cfg.get("batch_size", 5)),
+            force_rebuild=bool(self.evol_cfg.get("rebuild_pool", False)),
         )
 
     def eligible(self, patent: PatentText) -> bool:

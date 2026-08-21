@@ -18,10 +18,11 @@ def load_or_build_pool(
     user_prompt: str,
     pool_size: int,
     batch_size: int,
+    force_rebuild: bool = False,
 ) -> list[str]:
     pools_dir.mkdir(parents=True, exist_ok=True)
     path = pools_dir / f"{pool_name}.json"
-    if path.is_file():
+    if path.is_file() and not force_rebuild:
         with path.open(encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, list) and data:

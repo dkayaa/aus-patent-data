@@ -1,0 +1,55 @@
+"""Guard IPC teacher/pool prompts against the old 2-sentence + memo mismatch."""
+
+from __future__ import annotations
+
+import json
+import sys
+import unittest
+from pathlib import Path
+
+SRC = Path(__file__).resolve().parents[1] / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from tasks.ipc_reasoning import (  # noqa: E402
+    INSTRUCTION_POOL_PROMPT,
+    JUSTIFICATION_USER_TEMPLATE,
+)
+
+POOL_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "data"
+    / "derived"
+    / "instruction_generation"
+    / "_pools"
+    / "ipc_reasoning.json"
+)
+
+
+class IPCPromptTests(unittest.TestCase):
+    def test_teacher_is_paragraph_mapping_not_two_sentences(self) -> None:
+        text = JUSTIFICATION_USER_TEMPLATE.lower()
+        self.assertNotIn("two-sentence", text)
+        self.assertNotIn("two sentences", text)
+        self.assertIn("3–5 sentences", JUSTIFICATION_USER_TEMPLATE)
+        self.assertIn("GOLD", JUSTIFICATION_USER_TEMPLATE)
+        self.assertIn("Do not mention other IPC codes", JUSTIFICATION_USER_TEMPLATE)
+
+    def test_pool_meta_prompt_forbids_memos_and_reclassification(self) -> None:
+        text = INSTRUCTION_POOL_PROMPT.lower()
+        self.assertIn("do not ask to re-classify", text)
+        self.assertIn("must not request", text)
+        self.assertIn("multi-section", text)
+
+    def test_cached_pool_matches_target(self) -> None:
+        data = json.loads(POOL_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(len(data), 40)
+        blob = "\n".join(data).lower()
+        self.assertNotIn("examiner memorandum that systematically", blob)
+        self.assertNotIn("hierarchical position", blob)
+        for item in data:
+            self.assertTrue(str(item).strip())
+
+
+if __name__ == "__main__":
+    unittest.main()

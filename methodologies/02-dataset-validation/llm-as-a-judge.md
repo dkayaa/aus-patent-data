@@ -26,10 +26,10 @@ set -a && source .env && set +a
 .venv/bin/python scripts/judge_instruction_data.py --all --limit 50 --workers 12
 .venv/bin/python scripts/judge_instruction_data.py --task ipc_reasoning \
   --generator meta-llama/llama-3.3-70b-instruct \
-  --ids-file data/derived/instruction_generation_validation/meta-llama-llama-3.3-70b-instruct/ipc_reasoning/llm_judge_v0/done_ids.txt
+  --ids-file data/derived/instruction_generation_validation/meta-llama-llama-3.3-70b-instruct/ipc_reasoning/llm_judge/done_ids.txt
 ```
 
-Implementation: `dataset-validation/` (`config/llm_judge.yaml`, `src/run_llm_judge.py`, `src/judge_prompts.py`). Outputs: `{model_slug}/<task>/llm_judge/{passed,rejected,report.json,done_ids.txt}`. Prior uncalibrated grades (if archived) live under `{task}/llm_judge_v0/`.
+Implementation: `dataset-validation/` (`config/llm_judge.yaml`, `src/run_llm_judge.py`, `src/judge_prompts.py`). Outputs: `{model_slug}/<task>/llm_judge/{passed,rejected,report.json,done_ids.txt}`.
 
 Distributions and a later human↔judge threshold sweep: `scripts/calibrate_llm_judge.py`.
 

@@ -125,6 +125,14 @@ def build_parser() -> argparse.ArgumentParser:
             "{paths.output_dir}/{model_slug})"
         ),
     )
+    p.add_argument(
+        "--rebuild-pool",
+        action="store_true",
+        help=(
+            "Rebuild the Evol-Instruct phrasing pool for this --task "
+            "(requires a single --task; overwrites _pools/<task>.json)."
+        ),
+    )
     return p
 
 
@@ -349,6 +357,14 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     cfg = load_config(cfg_path)
 
+    if getattr(args, "rebuild_pool", False):
+        if args.all or not args.task:
+            print("error: --rebuild-pool requires a single --task", file=sys.stderr)
+            return 2
+        evol = dict(cfg.get("evol_instruct") or {})
+        evol["rebuild_pool"] = True
+        cfg["evol_instruct"] = evol
+
     paths = cfg.get("paths") or {}
     patents_dir = _resolve(
         args.patents_dir
@@ -419,6 +435,9 @@ def main(argv: list[str] | None = None) -> int:
 
     run_cfg = cfg.get("run") or {}
     limit = args.limit if args.limit is not None else run_cfg.get("limit")
+    if getattr(args, "rebuild_pool", False) and args.limit is None:
+        # Rebuild the pool in setup() without starting a generation pass.
+        limit = 0
     if limit is not None:
         limit = int(limit)
     workers = args.workers if args.workers is not None else run_cfg.get("workers")

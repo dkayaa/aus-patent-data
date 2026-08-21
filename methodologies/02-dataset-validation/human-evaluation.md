@@ -10,7 +10,7 @@ Use the **same Accept definition as Mode 2** (`methodologies/02-dataset-validati
 Full double-annotation of thousands of long patent examples is unrealistic. Prefer a **stratified audit** plus clear rubrics.
 
 ### Sample
-* **Size:** ~100–200 examples total, stratified across the three tasks (e.g. ~35–65 each). Prefer the **pinned Mode 2 ID list** (`llm_judge/done_ids.txt` or archived `llm_judge_v0/done_ids.txt`) so every audited row already has a judge grade.
+* **Size:** ~100–200 examples total, stratified across the three tasks (e.g. ~35–65 each). Prefer the **pinned Mode 2 ID list** (`llm_judge/done_ids.txt`) so every audited row already has a judge grade.
 * **Stratify further within task** when possible: IPC section (IPC reasoning), abstract length buckets, MRC answer type (number / composition / structure).
 * **Annotators:** ideally 2 people with patent/technical literacy (examiner trainee, patent attorney, or ML researcher + domain consult). One primary + one secondary for agreement.
 
