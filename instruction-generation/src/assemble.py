@@ -76,15 +76,23 @@ class ShardWriter:
     def add(self, record: dict[str, Any]) -> Path | None:
         self._buffer.append(record)
         self.n_written += 1
+        # Rewrite the in-progress shard so a crash cannot leave done_ids
+        # pointing at records that were never flushed.
+        path = write_shard(self.task_dir, self._index, self._buffer)
+        if not self.written_paths or self.written_paths[-1] != path:
+            self.written_paths.append(path)
         if len(self._buffer) >= self.shard_size:
-            return self.flush()
+            self._index += 1
+            self._buffer.clear()
+            return path
         return None
 
     def flush(self) -> Path | None:
         if not self._buffer:
             return None
         path = write_shard(self.task_dir, self._index, self._buffer)
-        self.written_paths.append(path)
+        if not self.written_paths or self.written_paths[-1] != path:
+            self.written_paths.append(path)
         self._index += 1
         self._buffer.clear()
         return path

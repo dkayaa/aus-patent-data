@@ -55,14 +55,21 @@ class IPCReasoningTask(Task):
             batch_size=int(self.evol_cfg.get("batch_size", 5)),
         )
 
-    def generate(self, patent: PatentText) -> dict[str, Any] | None:
-        if not patent.primary_ipc:
-            return None
-        if self.ipc_lookup is None:
-            return None
+    def eligible(self, patent: PatentText) -> bool:
+        if not patent.primary_ipc or self.ipc_lookup is None:
+            return False
         entry = self.ipc_lookup.get(patent.primary_ipc)
         # Skip codes with only a short title / no WIPO definition text — the
         # generator otherwise invents grounding and produces low-quality justifications.
+        return entry is not None and bool(entry.definition_statement)
+
+    def generate(self, patent: PatentText) -> dict[str, Any] | None:
+        if not self.eligible(patent):
+            return None
+        lookup = self.ipc_lookup
+        if lookup is None:
+            return None
+        entry = lookup.get(patent.primary_ipc)
         if entry is None or not entry.definition_statement:
             return None
 

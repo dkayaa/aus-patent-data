@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 from dataclasses import dataclass
 from typing import Any
 
@@ -86,13 +87,20 @@ def llm_config_from_dict(raw: dict[str, Any], *, overrides: dict[str, Any] | Non
 class LLMClient:
     def __init__(self, config: LLMConfig) -> None:
         self.config = config
-        api_key = os.environ.get(config.api_key_env) or "none"
-        self._client = OpenAI(
-            api_key=api_key,
-            base_url=config.base_url,
-            timeout=config.timeout_s,
-            max_retries=config.max_retries,
-        )
+        self._local = threading.local()
+
+    def _openai(self) -> OpenAI:
+        client = getattr(self._local, "client", None)
+        if client is None:
+            api_key = os.environ.get(self.config.api_key_env) or "none"
+            client = OpenAI(
+                api_key=api_key,
+                base_url=self.config.base_url,
+                timeout=self.config.timeout_s,
+                max_retries=self.config.max_retries,
+            )
+            self._local.client = client
+        return client
 
     def chat(
         self,
@@ -101,7 +109,7 @@ class LLMClient:
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> str:
-        resp = self._client.chat.completions.create(
+        resp = self._openai().chat.completions.create(
             model=self.config.model,
             messages=messages,  # type: ignore[arg-type]
             temperature=self.config.temperature if temperature is None else temperature,

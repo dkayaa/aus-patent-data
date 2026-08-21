@@ -50,6 +50,12 @@ pip install -r requirements.txt
 export OPENROUTER_API_KEY='...'
 .venv/bin/python scripts/generate_instruction_data.py \
   --task mrc --provider openrouter --model anthropic/claude-sonnet-4.6 --limit 10
+
+# Parallel OpenRouter calls (IPC / MRC). Abstract drafting is local and stays fast.
+# --limit is successful writes this run; already-written ids in done_ids.txt are skipped.
+# If one task is already complete, pass --task rather than --all.
+.venv/bin/python scripts/generate_instruction_data.py --task ipc_reasoning --limit 1000 \
+  --provider openrouter --model meta-llama/llama-3.3-70b-instruct --workers 12 --temperature 0.0
 ```
 
 Instruction pools (diversified phrasings for a fixed task) are generated once per task and cached under `data/derived/instruction_generation/_pools/`. Reused across generators so smoke tests are comparable. See `methodologies/01-instruction-data-generation/` for the full workflow.

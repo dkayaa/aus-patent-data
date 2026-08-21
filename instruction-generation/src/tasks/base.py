@@ -30,6 +30,10 @@ class Task(ABC):
     def setup(self) -> None:
         """Optional one-time setup (e.g. Evol-Instruct instruction pool)."""
 
+    def eligible(self, patent: PatentText) -> bool:
+        """Cheap pre-filter so the worker pool is not filled with local skips."""
+        return True
+
     @abstractmethod
     def generate(self, patent: PatentText) -> dict[str, Any] | None:
         """Return an Alpaca-style record, or None to skip."""

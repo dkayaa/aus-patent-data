@@ -29,5 +29,7 @@ evol_instruct:
 run:
   # Records per output shard part-NNNNN.jsonl.gz
   shard_size: 100
-  # Cap patents processed this run (null = all pending).
+  # Concurrent LLM calls. Keep 1 for a serial local server; 8–16 is typical for OpenRouter.
+  workers: 1
+  # Cap successful writes this run (null = all pending). Skips do not count.
   limit: null

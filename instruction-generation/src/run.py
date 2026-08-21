@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Any
 
@@ -81,12 +82,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="Max successful records to write this run (skips do not count)",
     )
     p.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help=(
+            "Concurrent LLM calls (default: run.workers in YAML, else 1). "
+            "Use >1 for OpenRouter; keep 1 for a serial local server."
+        ),
+    )
+    p.add_argument(
         "--provider",
         choices=("local", "openrouter"),
         default=None,
         help="Override llm.provider",
     )
     p.add_argument("--model", default=None, help="Override llm.model")
+    p.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        help="Override llm.temperature",
+    )
     p.add_argument("--base-url", default=None, help="Override llm.base_url")
     p.add_argument(
         "--patents-dir",
@@ -112,6 +128,30 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _try_generate(task: Any, patent: Any) -> tuple[Any, dict[str, Any] | None, BaseException | None]:
+    try:
+        return patent, task.generate(patent), None
+    except Exception as exc:  # noqa: BLE001 — continue batch on per-patent failures
+        return patent, None, exc
+
+
+def _write_ok(
+    *,
+    task_id: str,
+    task_dir: Path,
+    writer: ShardWriter,
+    patent: Any,
+    record: dict[str, Any],
+    n_ok: int,
+) -> int:
+    writer.add(record)
+    append_done_id(task_dir, patent.application_number)
+    n_ok += 1
+    if n_ok % 10 == 0:
+        print(f"[{task_id}] wrote {n_ok}…", flush=True)
+    return n_ok
+
+
 def run_task(
     task_id: str,
     *,
@@ -122,10 +162,12 @@ def run_task(
     dest: Path,
     pools: Path,
     limit: int | None,
+    workers: int,
 ) -> dict[str, Any]:
     evol_cfg = cfg.get("evol_instruct") or {}
     run_cfg = cfg.get("run") or {}
     shard_size = int(run_cfg.get("shard_size") or 100)
+    workers = max(1, int(workers))
 
     task_cls = TASKS[task_id]
     task = task_cls(
@@ -140,32 +182,19 @@ def run_task(
     task_dir = task_output_dir(dest, task_id)
     done = load_done_ids(task_dir)
     writer = ShardWriter(task_dir, shard_size=shard_size)
+    patents = iter_patent_texts(patents_dir, limit=None, skip_ids=done)
 
-    n_ok = 0
-    n_skip = 0
-    n_err = 0
-    # Iterate without a hard patent cap; --limit means successful writes.
-    for patent in iter_patent_texts(patents_dir, limit=None, skip_ids=done):
-        if limit is not None and n_ok >= limit:
-            break
-        try:
-            record = task.generate(patent)
-        except Exception as exc:  # noqa: BLE001 — continue batch on per-patent failures
-            n_err += 1
-            print(
-                f"[{task_id}] error {patent.application_number}: {exc}",
-                file=sys.stderr,
-                flush=True,
-            )
-            continue
-        if record is None:
-            n_skip += 1
-            continue
-        writer.add(record)
-        append_done_id(task_dir, patent.application_number)
-        n_ok += 1
-        if n_ok % 10 == 0:
-            print(f"[{task_id}] wrote {n_ok}…", flush=True)
+    if workers == 1:
+        n_ok, n_skip, n_err = _run_serial(
+            task_id, task=task, patents=patents, task_dir=task_dir,
+            writer=writer, limit=limit,
+        )
+    else:
+        print(f"[{task_id}] workers={workers}", flush=True)
+        n_ok, n_skip, n_err = _run_parallel(
+            task_id, task=task, patents=patents, task_dir=task_dir,
+            writer=writer, limit=limit, workers=workers,
+        )
 
     flushed = writer.flush()
     stats = {
@@ -173,6 +202,7 @@ def run_task(
         "written": n_ok,
         "skipped": n_skip,
         "errors": n_err,
+        "workers": workers,
         "shards": [str(p) for p in writer.written_paths],
         "last_flush": str(flushed) if flushed else None,
     }
@@ -181,6 +211,134 @@ def run_task(
         flush=True,
     )
     return stats
+
+
+def _run_serial(
+    task_id: str,
+    *,
+    task: Any,
+    patents: Any,
+    task_dir: Path,
+    writer: ShardWriter,
+    limit: int | None,
+) -> tuple[int, int, int]:
+    n_ok = 0
+    n_skip = 0
+    n_err = 0
+    for patent in patents:
+        if limit is not None and n_ok >= limit:
+            break
+        if not task.eligible(patent):
+            n_skip += 1
+            continue
+        patent, record, err = _try_generate(task, patent)
+        if err is not None:
+            n_err += 1
+            print(
+                f"[{task_id}] error {patent.application_number}: {err}",
+                file=sys.stderr,
+                flush=True,
+            )
+            continue
+        if record is None:
+            n_skip += 1
+            continue
+        n_ok = _write_ok(
+            task_id=task_id,
+            task_dir=task_dir,
+            writer=writer,
+            patent=patent,
+            record=record,
+            n_ok=n_ok,
+        )
+    return n_ok, n_skip, n_err
+
+
+def _run_parallel(
+    task_id: str,
+    *,
+    task: Any,
+    patents: Any,
+    task_dir: Path,
+    writer: ShardWriter,
+    limit: int | None,
+    workers: int,
+) -> tuple[int, int, int]:
+    n_ok = 0
+    n_skip = 0
+    n_err = 0
+    exhausted = False
+    inflight: dict[Future[tuple[Any, dict[str, Any] | None, BaseException | None]], Any] = {}
+    # Keep the pool fed. IPC skips locally; eligible() already dropped those.
+    target_inflight = workers * 3
+
+    def _submit(executor: ThreadPoolExecutor) -> bool:
+        nonlocal exhausted, n_skip
+        if exhausted:
+            return False
+        while True:
+            try:
+                patent = next(patents)
+            except StopIteration:
+                exhausted = True
+                return False
+            if not task.eligible(patent):
+                n_skip += 1
+                continue
+            fut = executor.submit(_try_generate, task, patent)
+            inflight[fut] = patent
+            return True
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        while True:
+            if limit is not None and n_ok >= limit:
+                for fut in inflight:
+                    fut.cancel()
+                break
+            while (
+                not exhausted
+                and len(inflight) < target_inflight
+                and (limit is None or n_ok + len(inflight) < limit)
+            ):
+                if not _submit(executor):
+                    break
+            if not inflight:
+                break
+            finished, _ = wait(inflight, return_when=FIRST_COMPLETED)
+            for fut in finished:
+                patent = inflight.pop(fut)
+                try:
+                    patent, record, err = fut.result()
+                except Exception as exc:  # noqa: BLE001
+                    n_err += 1
+                    print(
+                        f"[{task_id}] error {patent.application_number}: {exc}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    continue
+                if err is not None:
+                    n_err += 1
+                    print(
+                        f"[{task_id}] error {patent.application_number}: {err}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    continue
+                if record is None:
+                    n_skip += 1
+                    continue
+                if limit is not None and n_ok >= limit:
+                    continue
+                n_ok = _write_ok(
+                    task_id=task_id,
+                    task_dir=task_dir,
+                    writer=writer,
+                    patent=patent,
+                    record=record,
+                    n_ok=n_ok,
+                )
+    return n_ok, n_skip, n_err
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -226,6 +384,7 @@ def main(argv: list[str] | None = None) -> int:
             "provider": args.provider,
             "model": args.model,
             "base_url": args.base_url,
+            "temperature": args.temperature,
         },
     )
     dest = (
@@ -248,7 +407,7 @@ def main(argv: list[str] | None = None) -> int:
     client = LLMClient(llm_cfg)
     print(
         f"LLM provider={llm_cfg.provider} model={llm_cfg.model} "
-        f"base_url={llm_cfg.base_url}",
+        f"temperature={llm_cfg.temperature} base_url={llm_cfg.base_url}",
         flush=True,
     )
     print(f"Generator dir: {dest}", flush=True)
@@ -262,6 +421,9 @@ def main(argv: list[str] | None = None) -> int:
     limit = args.limit if args.limit is not None else run_cfg.get("limit")
     if limit is not None:
         limit = int(limit)
+    workers = args.workers if args.workers is not None else run_cfg.get("workers")
+    workers = max(1, int(workers or 1))
+    print(f"Workers: {workers}", flush=True)
 
     task_ids = sorted(TASKS.keys()) if args.all else [args.task]
     all_stats = []
@@ -275,6 +437,7 @@ def main(argv: list[str] | None = None) -> int:
             dest=dest,
             pools=shared_pools,
             limit=limit,
+            workers=workers,
         )
         all_stats.append(stats)
 
