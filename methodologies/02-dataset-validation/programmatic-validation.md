@@ -52,9 +52,10 @@ Library: `rouge-score` (ROUGE-L F1).
 | `abstract_drafting` | abstract vs claims |
 | `mrc` | answer vs claims |
 
-* **Model:** `sentence-transformers/all-MiniLM-L6-v2`
+* **Model:** `nomic-ai/nomic-embed-text-v1.5` (8,192-token context; document prefix `search_document:` on both sides)
 * **Score:** cosine similarity of mean-pooled embeddings
-* **Long text:** truncate each side to the model max length (512 tokens) before encode; batch for speed
+* **Long text:** truncate each side to 8,192 tokens. That covers typical claim bundles in this corpus (median ~560–750 MiniLM-equivalent tokens; p95 ~2k). MiniLM’s 256/512 window truncated most IPC/abstract/MRC claim sides.
+* **MRC caveat:** cosine of a short extractive answer vs the full claim set is still a weak quality signal even with 8k context. Containment + token-F1 remain the primary MRC floors.
 
 ## Soft floors (quarantine)
 Fail only if:

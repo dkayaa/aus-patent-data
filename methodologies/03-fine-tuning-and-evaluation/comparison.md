@@ -28,7 +28,7 @@ Compare fine-tuned students against each other and against baselines on a frozen
 | **Exact IPC accuracy** | Predicted `Classification` code == gold `primary_ipc` (normalized) | Headline metric for this task |
 | **Hierarchical IPC accuracy** | Match at section / class / subclass / group | Softer view when full symbol is hard |
 | **Justification ROUGE-L F1** | Lexical overlap of justification body vs gold justification (and optionally vs claims) | Complements code accuracy; not sufficient alone |
-| **Justification semantic cosine** | MiniLM (or stronger embedder) cosine vs gold / vs claims | Same family as Mode 1 semantic checks |
+| **Justification semantic cosine** | Nomic Embed cosine vs gold / vs claims | Same family as Mode 1 semantic checks |
 | **Format validity rate** | Output parses as `Classification` + `Justification` | Surface errors separate from content errors |
 
 PatentBERT-style baselines: report IPC/subclass accuracy only; mark generative metrics N/A.

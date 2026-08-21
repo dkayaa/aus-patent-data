@@ -7,10 +7,14 @@ paths:
   output_root: data/derived/instruction_generation_validation
 
 semantic:
-  model_name: sentence-transformers/all-MiniLM-L6-v2
-  batch_size: 32
-  # Max sequence length for encode (model default 512).
-  max_seq_length: 512
+  model_name: nomic-ai/nomic-embed-text-v1.5
+  batch_size: 8
+  # Trained to 8192 (RoPE). MiniLM's 256/512 window truncated most claim bundles.
+  max_seq_length: 8192
+  trust_remote_code: true
+  # Document–document relatedness (Nomic task prefixes are required).
+  prefix_a: "search_document: "
+  prefix_b: "search_document: "
 
 floors:
   semantic_cosine_min: 0.15

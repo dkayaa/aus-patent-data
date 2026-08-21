@@ -47,7 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description=(
             "Programmatic validation of instruction JSONL: schema/IPC + "
-            "ROUGE-L / token-F1 + MiniLM cosine."
+            "ROUGE-L / token-F1 + Nomic Embed cosine."
         )
     )
     p.add_argument(
@@ -83,7 +83,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--skip-semantic",
         action="store_true",
-        help="Skip MiniLM cosine (lexical + structural only)",
+        help="Skip embedding cosine (lexical + structural only)",
     )
     return p
 
@@ -206,13 +206,16 @@ def main(argv: list[str] | None = None) -> int:
     if not args.skip_semantic:
         sem_cfg = cfg.get("semantic") or {}
         print(
-            f"Loading semantic model: {sem_cfg.get('model_name', 'all-MiniLM-L6-v2')}",
+            f"Loading semantic model: {sem_cfg.get('model_name', 'nomic-ai/nomic-embed-text-v1.5')}",
             flush=True,
         )
         semantic = SemanticScorer(
-            str(sem_cfg.get("model_name") or "sentence-transformers/all-MiniLM-L6-v2"),
-            max_seq_length=int(sem_cfg.get("max_seq_length") or 512),
-            batch_size=int(sem_cfg.get("batch_size") or 32),
+            str(sem_cfg.get("model_name") or "nomic-ai/nomic-embed-text-v1.5"),
+            max_seq_length=int(sem_cfg.get("max_seq_length") or 8192),
+            batch_size=int(sem_cfg.get("batch_size") or 8),
+            prefix_a=str(sem_cfg.get("prefix_a") or "search_document: "),
+            prefix_b=str(sem_cfg.get("prefix_b") or "search_document: "),
+            trust_remote_code=bool(sem_cfg.get("trust_remote_code", True)),
         )
 
     if args.input_dir is not None or args.output_dir is not None:
