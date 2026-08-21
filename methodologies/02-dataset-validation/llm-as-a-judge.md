@@ -12,10 +12,10 @@ This mode follows the **LLM-as-a-judge** paradigm established by:
 
 They show strong LLM judges can reach ~human–human agreement levels on open-ended preference/quality judgments, with known biases (position, verbosity, self-enhancement) that we mitigate below.
 
-Optional complementary rubric style: Liu et al., *G-Eval* (EMNLP 2023) — step-by-step criteria then score — useful when we want dimensioned rubrics rather than a single preference vote.
+Optional complementary rubric style: Liu et al., *G-Eval* (EMNLP 2023) — step-by-step criteria then score — useful when we want dimensioned rubrics rather than a single preference vote. We use pointwise G-Eval-style rating (rationale, then 1–5), not pairwise MT-Bench battles.
 
 ## Scope
-**Sample-based by default** (not a full-corpus judge pass): Mode 1 survivors at `data/derived/instruction_generation_validation/{model_slug}/<task>/passed/`, default `sample_size: 50` per task (`--limit` overrides). Prefer judging after programmatic filters (Mode 1).
+**Sample-based by default** (not a full-corpus judge pass): Mode 1 survivors at `data/derived/instruction_generation_validation/{model_slug}/<task>/passed/`, default `sample_size: 50` per task (`--limit` overrides). Prefer judging after programmatic filters (Mode 1). Pin a frozen ID list with `--ids-file` when re-grading a calibration sample.
 
 ## Run
 
@@ -24,35 +24,45 @@ set -a && source .env && set +a
 .venv/bin/python scripts/judge_instruction_data.py --task ipc_reasoning
 .venv/bin/python scripts/judge_instruction_data.py --all --limit 50
 .venv/bin/python scripts/judge_instruction_data.py --all --limit 50 --workers 12
+.venv/bin/python scripts/judge_instruction_data.py --task ipc_reasoning \
+  --generator meta-llama/llama-3.3-70b-instruct \
+  --ids-file data/derived/instruction_generation_validation/meta-llama-llama-3.3-70b-instruct/ipc_reasoning/llm_judge_v0/done_ids.txt
 ```
 
-Implementation: `dataset-validation/` (`config/llm_judge.yaml`, `src/run_llm_judge.py`, `src/judge_prompts.py`). Outputs: `{model_slug}/<task>/llm_judge/{passed,rejected,report.json,done_ids.txt}`.
+Implementation: `dataset-validation/` (`config/llm_judge.yaml`, `src/run_llm_judge.py`, `src/judge_prompts.py`). Outputs: `{model_slug}/<task>/llm_judge/{passed,rejected,report.json,done_ids.txt}`. Prior uncalibrated grades (if archived) live under `{task}/llm_judge_v0/`.
+
+Distributions and a later human↔judge threshold sweep: `scripts/calibrate_llm_judge.py`.
 
 ## Judge setup
-* **Judge model:** frontier via OpenRouter (e.g. `anthropic/claude-sonnet-4.6` or stronger), **different from or at least not weaker than** the generator when possible. Temperature **0**.
+* **Judge model:** frontier via OpenRouter (e.g. `anthropic/claude-sonnet-4.6` or stronger), **different from or at least not weaker than** the generator when possible. Temperature **0**. Record the actual model id in `report.json`.
 * **Protocol:** single-answer pointwise scoring (not pairwise MT-Bench battles), with an explicit rubric per task — closer to G-Eval-style rating than Chatbot Arena win/lose.
-* **Output schema (JSON):** `{ "score": 1-5, "pass": bool, "rationale": "...", "failure_tags": [] }`
+* **Model JSON:** `{ "rationale": "...", "score": 1-5, "failure_tags": [] }` — rationale first. No `pass` field from the model.
+* **`pass`:** derived in code as `score >= pass_score_min` (default 4). Pre-human operating point; Mode 3 may change the threshold.
 
-## Task rubrics (summary)
+## Accept definition (shared with Mode 3)
 
-| Task | High score means |
-|------|------------------|
-| **ipc_reasoning** | Treat `primary_ipc` / Classification as gold — do not re-classify. Justification maps claims to that fixed place; no invented codes; not boilerplate |
-| **abstract_drafting** | Gold abstract is a fair compression of claims (judge checks *pair* coherence: instruction asks for abstract, input=claims, output=abstract); no obvious claim–abstract mismatch |
-| **mrc** | Question is answerable **only** from the claims; answer is extractive/verbatim-supported; no hallucination |
+**Usable SFT row?** Binary `pass` iff `score >= pass_score_min`.
 
-For abstract drafting the “output” is gold patent text — the judge mainly flags **misaligned triples** (bad instruction, truncated input, wrong field pairing), not “is this abstract well written by an LLM.”
+| Task | High score / Accept means | Fail (in scope) | Out of scope (do not fail) |
+|------|---------------------------|-----------------|----------------------------|
+| **ipc_reasoning** | Office `primary_ipc` is gold. Justification maps claims to that **fixed** place; no invented codes; definitions match the WIPO catalog text in the payload | Unfaithful to claims; fabricated definition (vs catalog); boilerplate; invented IPC token; scrape corruption | A different IPC would be “better”; obsolete-code arguments; re-classification |
+| **abstract_drafting** | Gold abstract is a matching pair for the claims (instruction asks for an abstract; input=claims; output=that invention’s abstract) | Topic mismatch; swapped/truncated/corrupted fields; instruction mismatch; claim-1 pasted as the abstract | Brief/generic official abstracts that still match the invention; USPTO style; missing dependent-claim detail |
+| **mrc** | Question answerable from claims; answer span-supported; no speculation | Unanswerable; unsupported / hallucinated answer; speculation; swapped fields | Stylistic phrasing of an otherwise extractive answer |
+
+IPC payload includes WIPO `ipc_title` + `definition_statement` from `data/ipc-codes/`. “Fabricated definition” means contradicting that catalog text, not the judge’s parametric memory.
+
+Failure tags are a **closed set** per task (unknown tags → `other`). IPC tags `wrong_ipc`, `obsolete_ipc_code`, `better_ipc_exists`, `suboptimal_ipc_selection`, and `classification_mismatch` are stripped if they leak.
 
 ## Bias mitigations (from Zheng et al.)
-* Fixed rubric + forced JSON (reduce verbosity gaming).
+* Fixed rubric + forced JSON (reduce verbosity gaming); rationale before score.
 * Do not reveal generator model identity in the judge prompt.
-* Optional: second judge pass or temperature 0 for stability.
-* Calibrate thresholds against the human slice (Mode 3).
+* Temperature 0 for stability.
+* Calibrate `pass_score_min` against the human slice (Mode 3) via `scripts/calibrate_llm_judge.py`.
 
 ## Outputs
-* Per-example judge JSONL alongside source ids
-* Aggregate: mean score, pass rate by task, top failure tags
-* Optional quarantine of `pass: false`
+* Per-example judge JSONL alongside source ids (`meta.llm_judge`)
+* Aggregate: mean score, pass rate by task, closed-set failure tags
+* Optional quarantine of `pass: false` (sample only — not a training filter)
 
 ## Implementation note
-Runnable code lives under `dataset-validation/` and reuses `instruction-generation/src/llm.py` (`LLMClient`, `chat_json`, OpenRouter). Rubrics in `judge_prompts.py` strip generator `meta.model` / provider from the judge-visible payload; IPC reasoning keeps `primary_ipc` / `ipc_title`.
+Runnable code lives under `dataset-validation/` and reuses `instruction-generation/src/llm.py` (`LLMClient`, `chat_json`, OpenRouter) and `ipc_lookup.py` for WIPO grounding. Rubrics in `judge_prompts.py` strip generator `meta.model` / provider from the judge-visible payload.

@@ -5,8 +5,8 @@ Validate seed instruction-tuning JSONL from [`01-instruction-data-generation`](.
 | Mode | Doc | Scope |
 |------|-----|--------|
 | Programmatic | [programmatic-validation.md](programmatic-validation.md) | Schema/IPC (WIPO-grounded cosine/ROUGE) + lexical (ROUGE-L / MRC best-span F1) + semantic (Nomic Embed); abstract drafting is gold-to-gold pairing; see `dataset-validation/` |
-| LLM-as-a-judge | [llm-as-a-judge.md](llm-as-a-judge.md) | Frontier model grades a **sample** (cite Zheng et al., MT-Bench) |
-| Human evaluation | [human-evaluation.md](human-evaluation.md) | Small expert-labeled slice; calibrate judge + report agreement |
+| LLM-as-a-judge | [llm-as-a-judge.md](llm-as-a-judge.md) | Frontier model grades a **sample** (pointwise; same Accept definition as Mode 3) |
+| Human evaluation | [human-evaluation.md](human-evaluation.md) | Small expert-labeled slice; calibrate `pass_score_min` + report agreement |
 
 Suggested order: programmatic filter/score → LLM judge on a sample of survivors → human audit on a stratified subsample.
 

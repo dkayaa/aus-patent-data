@@ -32,8 +32,15 @@ from judge_prompts import (  # noqa: E402
     build_judge_messages,
     normalize_judge_result,
 )
-from judge_sample import append_done_id, load_done_ids, sample_records  # noqa: E402
+from judge_sample import (  # noqa: E402
+    append_done_id,
+    load_done_ids,
+    load_ids_file,
+    records_for_ids,
+    sample_records,
+)
 from llm import LLMClient, chat_json, llm_config_from_dict  # noqa: E402
+from ipc_lookup import IPCLookup  # noqa: E402
 
 DEFAULT_CONFIG = REPO_ROOT / "dataset-validation" / "config" / "llm_judge.yaml"
 
@@ -97,6 +104,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help="Override llm_judge output dir (implies single --task)",
+    )
+    p.add_argument(
+        "--ids-file",
+        type=Path,
+        default=None,
+        help=(
+            "Pin application_number list (one per line). Skips seed shuffle. "
+            "Requires a single --task."
+        ),
     )
     p.add_argument(
         "--provider",
@@ -169,15 +185,21 @@ def _try_judge(
     client: LLMClient,
     rec: dict[str, Any],
     *,
+    task_id: str,
     truncate_chars: int,
     pass_score_min: int,
+    ipc_lookup: IPCLookup | None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None, BaseException | None]:
     try:
-        messages = build_judge_messages(rec, truncate_chars=truncate_chars)
+        messages = build_judge_messages(
+            rec, truncate_chars=truncate_chars, ipc_lookup=ipc_lookup
+        )
         raw = chat_json(client, messages, expect=dict)
         if not isinstance(raw, dict):
             raise ValueError(f"expected dict, got {type(raw)}")
-        result = normalize_judge_result(raw, pass_score_min=pass_score_min)
+        result = normalize_judge_result(
+            raw, task=task_id, pass_score_min=pass_score_min
+        )
         return rec, result, None
     except Exception as exc:  # noqa: BLE001 — continue like generation
         return rec, None, exc
@@ -195,6 +217,9 @@ def judge_task(
     truncate_chars: int,
     shard_size: int,
     workers: int,
+    ipc_lookup: IPCLookup | None = None,
+    pin_ids: list[str] | None = None,
+    ids_file: Path | None = None,
 ) -> dict[str, Any]:
     if not input_dir.is_dir():
         raise FileNotFoundError(f"Mode 1 passed dir missing: {input_dir}")
@@ -203,22 +228,45 @@ def judge_task(
     done_ids = load_done_ids(output_dir)
 
     all_records = list(iter_task_records(input_dir))
-    to_judge = sample_records(
-        all_records,
-        sample_size=sample_size,
-        seed=seed,
-        skip_ids=done_ids,
-    )
+    missing_ids: list[str] = []
+    if pin_ids is not None:
+        to_judge, missing_ids = records_for_ids(
+            all_records, pin_ids, skip_ids=done_ids
+        )
+        sample_size_target = len(pin_ids)
+        if missing_ids:
+            log.warning(
+                "%s: %d ids from --ids-file not in Mode 1 passed: %s",
+                task_id,
+                len(missing_ids),
+                ", ".join(missing_ids[:10])
+                + ("…" if len(missing_ids) > 10 else ""),
+            )
+        log.info(
+            "%s: %d Mode1 passed, %d already judged, pinning %d new (target %d)",
+            task_id,
+            len(all_records),
+            len(done_ids),
+            len(to_judge),
+            sample_size_target,
+        )
+    else:
+        to_judge = sample_records(
+            all_records,
+            sample_size=sample_size,
+            seed=seed,
+            skip_ids=done_ids,
+        )
+        sample_size_target = sample_size
+        log.info(
+            "%s: %d Mode1 passed, %d already judged, sampling %d new (target %d)",
+            task_id,
+            len(all_records),
+            len(done_ids),
+            len(to_judge),
+            sample_size_target,
+        )
     workers = max(1, int(workers))
-
-    log.info(
-        "%s: %d Mode1 passed, %d already judged, sampling %d new (target %d)",
-        task_id,
-        len(all_records),
-        len(done_ids),
-        len(to_judge),
-        sample_size,
-    )
     if workers > 1:
         log.info("%s: workers=%d", task_id, workers)
 
@@ -287,17 +335,21 @@ def judge_task(
             rec, result, err = _try_judge(
                 client,
                 rec,
+                task_id=task_id,
                 truncate_chars=truncate_chars,
                 pass_score_min=pass_score_min,
+                ipc_lookup=ipc_lookup,
             )
             _record_verdict(rec, result, err)
     else:
         _judge_parallel(
             to_judge,
             client=client,
+            task_id=task_id,
             truncate_chars=truncate_chars,
             pass_score_min=pass_score_min,
             workers=workers,
+            ipc_lookup=ipc_lookup,
             record_verdict=_record_verdict,
         )
 
@@ -322,8 +374,10 @@ def judge_task(
     report = {
         "task": task_id,
         "n_mode1_passed": len(all_records),
-        "sample_size_target": sample_size,
-        "seed": seed,
+        "sample_size_target": sample_size_target,
+        "seed": None if pin_ids is not None else seed,
+        "ids_file": str(ids_file) if ids_file is not None else None,
+        "n_ids_missing": len(missing_ids),
         "n_judged": n_judged,
         "n_pass": n_pass_total,
         "n_fail": n_fail_total,
@@ -338,7 +392,7 @@ def judge_task(
         "failure_tag_counts": dict(merged_tags.most_common()),
         "input_dir": str(input_dir),
         "output_dir": str(output_dir),
-        "note": "Sample-based Mode 2 judge; not a full-corpus pass.",
+        "note": "Sample-based Mode 2 judge; not a full-corpus pass. pass is score >= pass_score_min.",
         "_scores": all_scores,
     }
 
@@ -360,9 +414,11 @@ def _judge_parallel(
     to_judge: list[dict[str, Any]],
     *,
     client: LLMClient,
+    task_id: str,
     truncate_chars: int,
     pass_score_min: int,
     workers: int,
+    ipc_lookup: IPCLookup | None,
     record_verdict: Any,
 ) -> None:
     pending = iter(to_judge)
@@ -386,8 +442,10 @@ def _judge_parallel(
             _try_judge,
             client,
             rec,
+            task_id=task_id,
             truncate_chars=truncate_chars,
             pass_score_min=pass_score_min,
+            ipc_lookup=ipc_lookup,
         )
         inflight[fut] = rec
         return True
@@ -420,6 +478,15 @@ def main(argv: list[str] | None = None) -> int:
 
     input_root = _resolve(Path(paths.get("input_root", "data/derived/instruction_generation_validation")))
     output_root = _resolve(Path(paths.get("output_root", "data/derived/instruction_generation_validation")))
+    ipc_jsonl = _resolve(
+        Path(paths.get("ipc_jsonl") or "data/ipc-codes/ipc_codes_20260101.jsonl")
+    )
+    ipc_lookup: IPCLookup | None = None
+    if ipc_jsonl.is_file():
+        ipc_lookup = IPCLookup.from_jsonl(ipc_jsonl)
+        log.info("WIPO catalog: %s (%d codes)", ipc_jsonl, len(ipc_lookup))
+    else:
+        log.warning("WIPO catalog missing (%s); IPC judge will lack definition_statement", ipc_jsonl)
 
     sample_size = int(args.limit if args.limit is not None else judge_cfg.get("sample_size", 50))
     seed = int(judge_cfg.get("seed", 42))
@@ -428,6 +495,22 @@ def main(argv: list[str] | None = None) -> int:
     shard_size = int(judge_cfg.get("shard_size", 50))
     workers = args.workers if args.workers is not None else judge_cfg.get("workers")
     workers = max(1, int(workers or 1))
+
+    pin_ids: list[str] | None = None
+    ids_file: Path | None = None
+    if args.ids_file is not None:
+        if args.all or not args.task:
+            log.error("--ids-file requires a single --task")
+            return 2
+        ids_file = _resolve(args.ids_file)
+        if not ids_file.is_file():
+            log.error("--ids-file not found: %s", ids_file)
+            return 1
+        pin_ids = load_ids_file(ids_file)
+        if not pin_ids:
+            log.error("--ids-file is empty: %s", ids_file)
+            return 1
+        log.info("Pinned %d ids from %s", len(pin_ids), ids_file)
 
     overrides: dict[str, Any] = {}
     if args.provider:
@@ -482,6 +565,9 @@ def main(argv: list[str] | None = None) -> int:
                     truncate_chars=truncate_chars,
                     shard_size=shard_size,
                     workers=workers,
+                    ipc_lookup=ipc_lookup,
+                    pin_ids=pin_ids,
+                    ids_file=ids_file,
                 )
             )
         except FileNotFoundError as exc:

@@ -32,6 +32,47 @@ def append_done_id(judge_dir: Path, application_number: str) -> None:
         f.flush()
 
 
+def load_ids_file(path: Path) -> list[str]:
+    """Load application numbers, preserving order and dropping blanks/duplicates."""
+    ids: list[str] = []
+    seen: set[str] = set()
+    with path.open(encoding="utf-8") as f:
+        for line in f:
+            value = line.strip()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            ids.append(value)
+    return ids
+
+
+def records_for_ids(
+    records: list[dict[str, Any]],
+    ids: list[str],
+    *,
+    skip_ids: set[str] | None = None,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Select records in ``ids`` order. Returns (matched, missing_ids)."""
+    skip = skip_ids or set()
+    by_id: dict[str, dict[str, Any]] = {}
+    for rec in records:
+        app = str(rec.get("application_number") or "").strip()
+        if not app or app in by_id:
+            continue
+        by_id[app] = rec
+    matched: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for app in ids:
+        if app in skip:
+            continue
+        rec = by_id.get(app)
+        if rec is None:
+            missing.append(app)
+            continue
+        matched.append(rec)
+    return matched, missing
+
+
 def sample_records(
     records: list[dict[str, Any]],
     *,
