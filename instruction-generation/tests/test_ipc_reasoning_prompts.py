@@ -31,9 +31,11 @@ class IPCPromptTests(unittest.TestCase):
         text = JUSTIFICATION_USER_TEMPLATE.lower()
         self.assertNotIn("two-sentence", text)
         self.assertNotIn("two sentences", text)
-        self.assertIn("3–5 sentences", JUSTIFICATION_USER_TEMPLATE)
+        self.assertNotIn("one sentence stating what independent claim 1", text)
+        self.assertNotIn("do not start with", text)
         self.assertIn("GOLD", JUSTIFICATION_USER_TEMPLATE)
         self.assertIn("Do not mention other IPC codes", JUSTIFICATION_USER_TEMPLATE)
+        self.assertIn("Do not follow a fixed outline", JUSTIFICATION_USER_TEMPLATE)
 
     def test_pool_meta_prompt_forbids_memos_and_reclassification(self) -> None:
         text = INSTRUCTION_POOL_PROMPT.lower()

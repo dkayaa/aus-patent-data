@@ -15,7 +15,7 @@ SYSTEM_PROMPT = "You are an expert Australian Patent Examiner."
 # Teacher prompt: used only to synthesize the justification (not the SFT instruction).
 JUSTIFICATION_USER_TEMPLATE = """The assigned IPC code is GOLD. Do not propose a different code.
 
-Here is the official WIPO catalog text for that code, plus the patent abstract and claims. Write a short technical justification that maps this invention to that fixed place.
+Here is the official WIPO catalog text for that code, plus the patent abstract and claims.
 
 {ipc_block}
 
@@ -25,11 +25,11 @@ Abstract:
 Claims:
 {claims}
 
-Requirements:
-- One sentence stating what independent claim 1 actually is (concrete features, not the IPC title).
-- Then 3–5 sentences, each tying a named claim feature to a clause of the WIPO definition above. Quote or tightly paraphrase that catalog text; do not invent definitional scope.
-- Use only the provided definition. Do not mention other IPC codes. Do not start with "The assigned code is correct because".
-- Justification only: no Classification line, no headings, no bullet list. Target about 120–220 words."""
+Write a short technical justification (about 120–220 words) that maps this invention’s claimed subject matter onto the WIPO definition.
+
+- Ground the mapping in concrete claim features (parts, steps, materials), not the IPC title. Quote or tightly paraphrase the catalog text; do not invent definitional scope.
+- Use only the provided definition. Do not mention other IPC codes.
+- Prose only: no Classification line, no headings, no bullet list. Do not follow a fixed outline. Opening, sentence count, and order may vary from example to example."""
 
 # Instruction diversification (same pattern as abstract drafting pools).
 # Pool wordings must match the teacher target: one paragraph, claim→definition
@@ -37,8 +37,8 @@ Requirements:
 INSTRUCTION_POOL_PROMPT = (
     "I am building an instruction-tuning dataset for patent IPC classification "
     "reasoning. Generate 5 diverse, professional instructions that ask a model to "
-    "write a short paragraph (about 4–8 sentences) justifying an already-assigned "
-    "IPC code by mapping independent-claim features to that classification place. "
+    "write a short paragraph justifying an already-assigned "
+    "IPC code by mapping claim features to that classification place. "
     "Vary length, tone, and framing (examiner note, attorney file note, brief "
     "rationale, classification log). All variants must: treat the assigned code as "
     "given (do not ask to re-classify, pick a better code, or discuss adjacent "

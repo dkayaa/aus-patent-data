@@ -26,7 +26,7 @@ This is instruction-phrasing diversification (Self-Instruct-style expansion of w
 3.  **Sample instruction:** Draw one string from the instruction pool (build/load pool first if missing).
 4.  **Prompt the Generator LLM (justification only):** The teacher sees abstract, claims, IPC code, title, and WIPO definition — these grounding fields are *not* copied into the student `input`.
     *   **System Prompt:** "You are an expert Australian Patent Examiner."
-    *   **User Prompt:** Treat the assigned code as gold. One sentence on independent claim 1, then 3–5 sentences each mapping a named claim feature to a clause of the **provided** WIPO definition (~120–220 words). No invented scope, no other IPC codes, no “assigned code is correct because” opener.
+    *   **User Prompt:** Treat the assigned code as gold. Short prose (~120–220 words) mapping claimed subject matter to the **provided** WIPO definition. No invented scope, no other IPC codes. Do not prescribe a sentence recipe or a stock opening; structure may vary.
 5.  **Assemble:**
     *   `instruction` = sampled pool string
     *   `input` = abstract + claims only
