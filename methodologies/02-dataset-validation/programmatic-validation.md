@@ -38,7 +38,7 @@ Per record:
 |------|--------|------|
 | `ipc_reasoning` | ROUGE-L F1 | Justification body vs `input` |
 | `abstract_drafting` | ROUGE-L F1 | abstract (`output`) vs claims (`input`) |
-| `mrc` | Token-F1 + answer **containment** in claims | answer vs claims (claims parsed from `input`) |
+| `mrc` | Best-span token-F1 | answer vs sliding windows of claims; verbatim containment short-circuits to 1.0 |
 
 Also record: `len_input_tokens`, `len_output_tokens`, `compression_ratio = len_out / len_in`.
 
@@ -50,18 +50,18 @@ Library: `rouge-score` (ROUGE-L F1).
 |------|------|
 | `ipc_reasoning` | Justification vs `input` |
 | `abstract_drafting` | abstract vs claims |
-| `mrc` | answer vs claims |
+
+Not computed for `mrc` (short extractive answers vs the full claim set are a weak quality signal).
 
 * **Model:** `nomic-ai/nomic-embed-text-v1.5` (8,192-token context; document prefix `search_document:` on both sides)
 * **Score:** cosine similarity of mean-pooled embeddings
-* **Long text:** truncate each side to 8,192 tokens. That covers typical claim bundles in this corpus (median ~560–750 MiniLM-equivalent tokens; p95 ~2k). MiniLM’s 256/512 window truncated most IPC/abstract/MRC claim sides.
-* **MRC caveat:** cosine of a short extractive answer vs the full claim set is still a weak quality signal even with 8k context. Containment + token-F1 remain the primary MRC floors.
+* **Long text:** truncate each side to 8,192 tokens. That covers typical claim bundles in this corpus (median ~560–750 MiniLM-equivalent tokens; p95 ~2k). MiniLM’s 256/512 window truncated most IPC/abstract claim sides.
 
 ## Soft floors (quarantine)
 Fail only if:
-* semantic cosine `< 0.15`, or
+* semantic cosine `< 0.15` (IPC reasoning / abstract drafting only), or
 * ROUGE-L F1 `< 0.02` (IPC reasoning / abstract drafting), or
-* MRC: answer not contained **and** token-F1 `< 0.1`
+* MRC: best-span token-F1 `< 0.5`
 
 Borderline scores remain in the pass set with `meta.validation` filled in.
 

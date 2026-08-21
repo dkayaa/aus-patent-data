@@ -111,7 +111,7 @@ def validate_task(
     fail_counts: Counter[str] = Counter()
     rouge_vals: list[float] = []
     cos_vals: list[float] = []
-    token_f1_vals: list[float] = []
+    best_span_vals: list[float] = []
     n_total = 0
     n_pass = 0
     n_reject = 0
@@ -134,8 +134,8 @@ def validate_task(
             rouge_vals.append(float(scores["rouge_l_f1"]))
         if scores.get("semantic_cosine") is not None:
             cos_vals.append(float(scores["semantic_cosine"]))
-        if scores.get("token_f1") is not None:
-            token_f1_vals.append(float(scores["token_f1"]))
+        if scores.get("best_span_f1") is not None:
+            best_span_vals.append(float(scores["best_span_f1"]))
 
         if validation["passed"]:
             passed_writer.add(out_rec)
@@ -160,7 +160,7 @@ def validate_task(
         "fail_rule_counts": dict(fail_counts),
         "mean_rouge_l_f1": _mean(rouge_vals),
         "mean_semantic_cosine": _mean(cos_vals),
-        "mean_token_f1": _mean(token_f1_vals),
+        "mean_best_span_f1": _mean(best_span_vals),
         "passed_shards": [str(p) for p in passed_writer.paths],
         "rejected_shards": [str(p) for p in rejected_writer.paths],
     }
@@ -199,11 +199,23 @@ def main(argv: list[str] | None = None) -> int:
     floors = {
         "semantic_cosine_min": float((cfg.get("floors") or {}).get("semantic_cosine_min", 0.15)),
         "rouge_l_f1_min": float((cfg.get("floors") or {}).get("rouge_l_f1_min", 0.02)),
-        "mrc_token_f1_min": float((cfg.get("floors") or {}).get("mrc_token_f1_min", 0.1)),
+        "mrc_best_span_f1_min": float(
+            (cfg.get("floors") or {}).get("mrc_best_span_f1_min", 0.5)
+        ),
     }
 
+    if args.input_dir is not None or args.output_dir is not None:
+        if args.all or not args.task:
+            print(
+                "error: --input-dir/--output-dir require a single --task",
+                file=sys.stderr,
+            )
+            return 1
+
+    task_ids = list(TASKS) if args.all else [args.task]
     semantic: SemanticScorer | None = None
-    if not args.skip_semantic:
+    load_semantic = (not args.skip_semantic) and any(tid != "mrc" for tid in task_ids)
+    if load_semantic:
         sem_cfg = cfg.get("semantic") or {}
         print(
             f"Loading semantic model: {sem_cfg.get('model_name', 'nomic-ai/nomic-embed-text-v1.5')}",
@@ -218,14 +230,6 @@ def main(argv: list[str] | None = None) -> int:
             trust_remote_code=bool(sem_cfg.get("trust_remote_code", True)),
         )
 
-    if args.input_dir is not None or args.output_dir is not None:
-        if args.all or not args.task:
-            print(
-                "error: --input-dir/--output-dir require a single --task",
-                file=sys.stderr,
-            )
-            return 1
-
     gen_in: Path | None = None
     gen_out: Path | None = None
     if args.input_dir is None or args.output_dir is None:
@@ -237,7 +241,6 @@ def main(argv: list[str] | None = None) -> int:
         gen_out = output_root / gen_in.name
         print(f"Generator: {gen_in.name}", flush=True)
 
-    task_ids = list(TASKS) if args.all else [args.task]
     reports = []
     for task_id in task_ids:
         if args.input_dir is not None:

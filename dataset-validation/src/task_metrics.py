@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ipc_checks import check_ipc_reasoning, parse_ipc_output
-from lexical import answer_contained, rouge_l_f1, token_f1
+from lexical import answer_contained, best_span_f1, rouge_l_f1
 from schema import check_schema, check_task_light, parse_mrc_input, simple_tokenize
 from semantic import SemanticScorer
 
@@ -81,7 +81,7 @@ def score_record(
     metrics: dict[str, Any] = {
         **length_features(input_text, scored_out or output_text),
         "rouge_l_f1": None,
-        "token_f1": None,
+        "best_span_f1": None,
         "answer_contained": None,
         "semantic_cosine": None,
     }
@@ -89,30 +89,27 @@ def score_record(
     if pair is not None:
         side_a, side_b = pair
         if task == "mrc":
-            metrics["token_f1"] = token_f1(side_a, side_b)
             metrics["answer_contained"] = answer_contained(side_b, side_a)
-            # Also record ROUGE for reporting consistency
+            metrics["best_span_f1"] = best_span_f1(side_a, side_b)
             metrics["rouge_l_f1"] = rouge_l_f1(side_a, side_b)
         else:
             metrics["rouge_l_f1"] = rouge_l_f1(side_a, side_b)
-
-        if semantic is not None:
-            metrics["semantic_cosine"] = semantic.cosine_pair(side_a, side_b)
+            if semantic is not None:
+                metrics["semantic_cosine"] = semantic.cosine_pair(side_a, side_b)
 
     # Soft floors
     cos_min = float(floors.get("semantic_cosine_min", 0.15))
     rouge_min = float(floors.get("rouge_l_f1_min", 0.02))
-    mrc_f1_min = float(floors.get("mrc_token_f1_min", 0.1))
+    mrc_span_min = float(floors.get("mrc_best_span_f1_min", 0.5))
 
     cos = metrics["semantic_cosine"]
-    if cos is not None and cos < cos_min:
+    if task != "mrc" and cos is not None and cos < cos_min:
         failed.append("semantic_cosine_below_floor")
 
     if task == "mrc":
-        contained = bool(metrics["answer_contained"])
-        tf1 = metrics["token_f1"]
-        if not contained and tf1 is not None and tf1 < mrc_f1_min:
-            failed.append("mrc_lexical_below_floor")
+        span_f1 = metrics["best_span_f1"]
+        if span_f1 is not None and span_f1 < mrc_span_min:
+            failed.append("mrc_best_span_f1_below_floor")
     else:
         rl = metrics["rouge_l_f1"]
         if rl is not None and rl < rouge_min:

@@ -19,7 +19,7 @@ semantic:
 floors:
   semantic_cosine_min: 0.15
   rouge_l_f1_min: 0.02
-  mrc_token_f1_min: 0.1
+  mrc_best_span_f1_min: 0.5
 
 run:
   shard_size: 100
