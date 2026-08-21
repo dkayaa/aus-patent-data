@@ -45,6 +45,9 @@ Scrapers use `application_number` (and related IDs) to pull semantic text from t
 | `derived/instruction_generation/_pools/` | `scripts/generate_instruction_data.py` | Shared Evol-Instruct instruction phrasings (not per-model) |
 | `derived/instruction_generation/{model_slug}/` | `scripts/generate_instruction_data.py` | Per-generator SFT JSONL: `manifest.json` + `<task>/part-*.jsonl.gz` + `done_ids.txt` |
 | `derived/instruction_generation_validation/{model_slug}/` | `scripts/validate_instruction_data.py`, `scripts/judge_instruction_data.py` | Mode 1 `passed/`/`rejected/` + Mode 2 `llm_judge/` per task |
+| `derived/evaluation/splits/{model_slug}/` | `scripts/split_eval_data.py` | Frozen train/val/test JSONL + `split_manifest.json` + `exemplars.json` |
+| `derived/evaluation/predictions/{system_slug}/` | `scripts/run_baselines.py` | OpenRouter zero-shot / 3-shot predictions per task |
+| `derived/evaluation/scores/` | `scripts/score_baselines.py` | Per-system `report.json` + `summary.json` |
 
 ### `patent_search` / `patent_search_clean` storage
 

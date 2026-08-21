@@ -25,8 +25,9 @@ Compare fine-tuned students against each other and against baselines on a frozen
 
 | Metric | What it measures | Notes |
 |--------|------------------|--------|
-| **Exact IPC accuracy** | Predicted `Classification` code == gold `primary_ipc` (normalized) | Headline metric for this task |
-| **Hierarchical IPC accuracy** | Match at section / class / subclass / group | Softer view when full symbol is hard |
+| **Exact IPC accuracy** | Predicted `Classification` code == gold `primary_ipc` (normalized) | Strict headline: requires the SFT two-line schema |
+| **Lenient exact IPC accuracy** | Gold `primary_ipc` appears anywhere in the output (normalized; spaces in symbols ignored) | Format-robust; markdown / examiner memos still count. Report next to strict exact and format-valid |
+| **Hierarchical IPC accuracy** | Match at section / class / subclass / group | Softer view when full symbol is hard; still uses the parsed `Classification` line |
 | **Justification ROUGE-L F1** | Lexical overlap of justification body vs gold justification (and optionally vs claims) | Complements code accuracy; not sufficient alone |
 | **Justification semantic cosine** | Nomic Embed cosine vs gold / vs claims | Same family as Mode 1 semantic checks |
 | **Format validity rate** | Output parses as `Classification` + `Justification` | Surface errors separate from content errors |

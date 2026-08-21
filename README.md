@@ -8,7 +8,9 @@ Research repository for constructing an Australian patent dataset. This repo is 
 2. **Scrape** — use those application numbers to fetch **semantic textual data** from the IP Australia API into `data/`.
 3. **Classification** — label / categorize the enriched records.
 4. **Instruction generation** — synthesize instruction-tuning JSONL from cleaned patents (optional peer stage).
-5. **Release artifacts** — final tables under `data/processed/`.
+5. **Dataset validation** — Mode 1 programmatic checks and optional Mode 2 LLM-as-a-judge on that JSONL.
+6. **Eval** — freeze a temporal test split and run OpenRouter zero-shot / 3-shot baselines (no training).
+7. **Release artifacts** — final tables under `data/processed/`.
 
 ## For Cursor agents
 
@@ -24,12 +26,14 @@ Work is organized by **pipeline stage**, not by language or framework:
 | Enrich | `scrape/` | Call IP Australia (and related) APIs to fetch semantic text for known application numbers. Does not invent the application list. |
 | Label | `classification/` | Apply taxonomies, rules, or models. No API fetching of patent text. |
 | Instruction SFT | `instruction-generation/` | Synthetic instruction-tuning JSONL from cleaned patents + IPC catalog via LLM (local or OpenRouter). |
+| Dataset validation | `dataset-validation/` | Mode 1 programmatic checks + Mode 2 LLM-as-a-judge (sample of Mode 1 `passed/`). |
+| Eval | `evaluation/` | Frozen temporal test split of Mode 1 `passed/` + OpenRouter zero-shot / 3-shot baselines + automatic scores. |
 
 ### Hard rules
 
-1. **Do not mix stages.** API clients and downloaders stay in `scrape/`. Labeling stays in `classification/`. Synthetic SFT generation stays in `instruction-generation/`.
+1. **Do not mix stages.** API clients and downloaders stay in `scrape/`. Labeling stays in `classification/`. Synthetic SFT generation stays in `instruction-generation/`. Validation scoring stays in `dataset-validation/`. Baseline eval stays in `evaluation/`.
 2. **Scrape is enrichment, not discovery.** The application universe comes from IP Rapid (or a full dump later). Scrapers take `application_number` (and related IDs) from `data/raw/` and fetch text/metadata from IP Australia.
-3. **Pipeline direction:** `data/raw` (base) → `scrape/` → enriched artifacts in `data/` → (`classification/` and/or `instruction-generation/`) → `data/derived/` / `data/processed/`.
+3. **Pipeline direction:** `data/raw` (base) → `scrape/` → enriched artifacts in `data/` → (`classification/` and/or `instruction-generation/` → `dataset-validation/` → `evaluation/`) → `data/derived/` / `data/processed/`.
 4. **Toy vs bulk via Git LFS.** Dataset files under `data/` (`*.csv`, `*.json`, archives, etc.) are tracked with **Git LFS** (see `.gitattributes`). Pointers live in git; blobs live in LFS storage. Install with `git lfs install` before cloning/pulling data.
 5. **Prefer importable modules over notebooks** for anything that must be reproducible for the paper.
 6. **Document sources and regeneration** in each stage README (what is read, what is written, how to run).
@@ -44,6 +48,8 @@ Work is organized by **pipeline stage**, not by language or framework:
 | Defining or changing labels / taxonomy | `classification/schemas/` |
 | Implementing labeling logic or models | `classification/src/` |
 | Building synthetic instruction-tuning data | `instruction-generation/src/`, config in `instruction-generation/config/` |
+| Scoring Mode 1 / Mode 2 on generated SFT | `dataset-validation/src/`, config in `dataset-validation/config/` |
+| Frozen test splits and OpenRouter baselines | `evaluation/src/`, config in `evaluation/config/` |
 | Writing pipeline glue / one-shot runners | `scripts/` |
 | Changing project-wide deps | root `pyproject.toml` / `requirements.txt` (when added) |
 
@@ -57,6 +63,12 @@ data/raw/application-toy.csv   (IP Rapid seed: IDs + status/dates)
             │
             ├─► classification/          ── labels / models ──► data/derived/
             └─► instruction-generation/ ── synthetic SFT JSONL ──► data/derived/instruction_generation/{model_slug}/
+                        │
+                        ▼
+              dataset-validation/ ── Mode 1 passed/ + Mode 2 sample ──► data/derived/instruction_generation_validation/
+                        │
+                        ▼
+                  evaluation/ ── frozen splits + OpenRouter baselines ──► data/derived/evaluation/
 ```
 
 Each stage should use **explicit paths** (config or CLI args).
@@ -88,7 +100,11 @@ aus-patent-data/
 │   ├── src/
 │   ├── config/
 │   └── README.md
-├── methodologies/          # numbered method notes (01 generation, 02 validation, …)
+├── evaluation/             # frozen splits + OpenRouter baselines
+│   ├── src/
+│   ├── config/
+│   └── README.md
+├── methodologies/          # numbered method notes (01 generation, 02 validation, 03 eval)
 ├── data/
 │   ├── raw/                # base dumps + (later) raw API payloads
 │   │   └── application-toy.csv
@@ -108,6 +124,7 @@ aus-patent-data/
 - Classification: PatentBERT claim-level CPC-subclass inference (`classification/src/run_patentbert.py` → `data/derived/patentbert/`).
 - Instruction generation: synthetic SFT JSONL (`instruction-generation/` → `data/derived/instruction_generation/{model_slug}/`).
 - Dataset validation: Mode 1 `scripts/validate_instruction_data.py`; Mode 2 sample judge `scripts/judge_instruction_data.py` → `data/derived/instruction_generation_validation/{model_slug}/`.
+- Eval: frozen splits `scripts/split_eval_data.py`; OpenRouter baselines `scripts/run_baselines.py`; scores `scripts/score_baselines.py` → `data/derived/evaluation/`.
 
 ## Reproduction (partial)
 
@@ -130,4 +147,4 @@ python scripts/run_patentbert.py
 python scripts/generate_instruction_data.py --task ipc_reasoning --limit 20
 ```
 
-See `scrape/README.md` for config (client credentials → JWT, `max_responses`, backoff) and idempotent re-runs. See `classification/README.md` for PatentBERT. See `instruction-generation/README.md` for LLM provider swap (local / OpenRouter).
+See `scrape/README.md` for config (client credentials → JWT, `max_responses`, backoff) and idempotent re-runs. See `classification/README.md` for PatentBERT. See `instruction-generation/README.md` for LLM provider swap (local / OpenRouter). See `evaluation/README.md` for frozen splits and OpenRouter baselines.

@@ -1,0 +1,52 @@
+# Zero-shot / few-shot OpenRouter baselines (no SFT).
+
+paths:
+  passed_root: data/derived/instruction_generation_validation
+  patents_dir: data/derived/patent_search_clean
+  output_root: data/derived/evaluation
+
+split:
+  seed: 42
+  test_min_filed_date: "2024-01-01"
+  test_fraction: 0.10
+  train_val_ratio: 0.80
+
+fewshot:
+  k: 3
+  exemplar_input_chars: 4000
+
+llm:
+  provider: openrouter
+  temperature: 0.0
+  timeout_s: 120
+  max_retries: 3
+  workers: 12
+
+decode:
+  max_tokens:
+    ipc_reasoning: 1024
+    abstract_drafting: 1024
+    mrc: 256
+  shard_size: 100
+
+semantic:
+  model_name: nomic-ai/nomic-embed-text-v1.5
+  batch_size: 8
+  max_seq_length: 8192
+  trust_remote_code: true
+  prefix_a: "search_document: "
+  prefix_b: "search_document: "
+
+systems:
+  - id: qwen-2.5-7b-instruct
+    role: student
+    model: qwen/qwen-2.5-7b-instruct
+  - id: llama-3.1-8b-instruct
+    role: student
+    model: meta-llama/llama-3.1-8b-instruct
+  - id: llama-3.3-70b-instruct
+    role: teacher
+    model: meta-llama/llama-3.3-70b-instruct
+  - id: gpt-4o
+    role: frontier
+    model: openai/gpt-4o

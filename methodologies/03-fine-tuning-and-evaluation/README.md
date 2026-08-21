@@ -10,4 +10,12 @@ Fine-tune one or more open-source models on validated instruction data from [`02
 
 Suggested order: freeze train/val/test splits from Mode 1 (+ optional Mode 2/3) survivors → fine-tune open-source students → run the same eval suite on students and baselines → report side-by-side metrics.
 
-Runnable training/eval code is not yet staged in-repo; these notes define the methodology for that stage.
+Runnable **baseline eval** (no training) lives in [`evaluation/`](../../evaluation/):
+
+```bash
+.venv/bin/python scripts/split_eval_data.py --generator meta-llama/llama-3.3-70b-instruct
+.venv/bin/python scripts/run_baselines.py --all --generator meta-llama/llama-3.3-70b-instruct
+.venv/bin/python scripts/score_baselines.py --generator meta-llama/llama-3.3-70b-instruct
+```
+
+SFT / LoRA, PatentBERT, local HF generate, and LLM-as-a-judge on predictions are deferred; they should reuse the same frozen test IDs. See [`evaluation/README.md`](../../evaluation/README.md).

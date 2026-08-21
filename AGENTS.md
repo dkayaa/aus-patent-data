@@ -20,10 +20,11 @@ Work is organized by **pipeline stage**, not by language or framework. See also 
 | Label | `classification/` | Apply taxonomies, rules, or models. No API fetching of patent text. |
 | Instruction SFT | `instruction-generation/` | Build synthetic instruction-tuning JSONL from cleaned patents + IPC catalog via an LLM (local OpenAI-compatible server or OpenRouter). No IP Australia scraping; not taxonomy labeling. |
 | Dataset validation | `dataset-validation/` | Mode 1 programmatic checks + Mode 2 LLM-as-a-judge (sample of Mode 1 `passed/`). |
+| Eval | `evaluation/` | Frozen temporal test split of Mode 1 `passed/` + OpenRouter zero-shot / 3-shot baselines + automatic scores. Does not scrape, generate SFT, or train. |
 
 ### Hard rules
 
-1. **Do not mix stages.** API clients and downloaders stay in `scrape/`. Labeling stays in `classification/`. Synthetic SFT generation stays in `instruction-generation/`. Validation scoring stays in `dataset-validation/`.
+1. **Do not mix stages.** API clients and downloaders stay in `scrape/`. Labeling stays in `classification/`. Synthetic SFT generation stays in `instruction-generation/`. Validation scoring stays in `dataset-validation/`. Baseline eval stays in `evaluation/`.
 2. **Scrape is enrichment, not discovery.** The application universe comes from IP Rapid (or a full dump later).
-3. **Pipeline direction:** `data/raw` → `scrape/` → `data/derived/patent_search_clean` → (`classification/` and/or `instruction-generation/` → `dataset-validation/`) → further `data/derived/` / `data/processed/`.
-4. Methodology notes live under `methodologies/` (e.g. `01-instruction-data-generation/`, `02-dataset-validation/`). Runnable generation: `instruction-generation/` + `scripts/generate_instruction_data.py` → `data/derived/instruction_generation/{model_slug}/`. Mode 1: `scripts/validate_instruction_data.py`. Mode 2 LLM-as-a-judge: `scripts/judge_instruction_data.py` (under `dataset-validation/`) → `data/derived/instruction_generation_validation/{model_slug}/`.
+3. **Pipeline direction:** `data/raw` → `scrape/` → `data/derived/patent_search_clean` → (`classification/` and/or `instruction-generation/` → `dataset-validation/` → `evaluation/`) → further `data/derived/` / `data/processed/`.
+4. Methodology notes live under `methodologies/` (e.g. `01-instruction-data-generation/`, `02-dataset-validation/`, `03-fine-tuning-and-evaluation/`). Runnable generation: `instruction-generation/` + `scripts/generate_instruction_data.py` → `data/derived/instruction_generation/{model_slug}/`. Mode 1: `scripts/validate_instruction_data.py`. Mode 2 LLM-as-a-judge: `scripts/judge_instruction_data.py` (under `dataset-validation/`) → `data/derived/instruction_generation_validation/{model_slug}/`. Eval splits/baselines/scores: `scripts/split_eval_data.py`, `scripts/run_baselines.py`, `scripts/score_baselines.py` → `data/derived/evaluation/`.

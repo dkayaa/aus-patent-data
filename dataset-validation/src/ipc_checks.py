@@ -11,6 +11,11 @@ IPC_RE = re.compile(
 IPC_FIND_RE = re.compile(
     r"\b([A-H][0-9]{2}[A-Z](?:[0-9]{1,4}/[0-9]{2,6})?)\b"
 )
+# Same shape, no word boundaries — used on whitespace-stripped text so
+# "H04N 19/593" still counts as H04N19/593.
+_IPC_FIND_COMPACT_RE = re.compile(
+    r"([A-H][0-9]{2}[A-Z](?:[0-9]{1,4}/[0-9]{2,6})?)"
+)
 OUTPUT_RE = re.compile(
     r"Classification:\s*(?P<code>\S+)\s*\nJustification:\s*(?P<body>.+)",
     re.DOTALL | re.IGNORECASE,
@@ -29,6 +34,24 @@ def parse_ipc_output(output: str) -> tuple[str | None, str | None]:
     if not m:
         return None, None
     return normalize_ipc(m.group("code")), m.group("body").strip()
+
+
+def find_ipc_mentions(text: str) -> list[str]:
+    """Normalized IPC-shaped tokens anywhere in free text.
+
+    Strips whitespace first so office-style ``H04N 19/593`` matches
+    ``H04N19/593``. Order is left-to-right; duplicates are dropped.
+    """
+    compact = re.sub(r"\s+", "", text.upper())
+    found: list[str] = []
+    seen: set[str] = set()
+    for match in _IPC_FIND_COMPACT_RE.finditer(compact):
+        norm = normalize_ipc(match.group(1))
+        if norm in seen or not IPC_RE.match(norm):
+            continue
+        seen.add(norm)
+        found.append(norm)
+    return found
 
 
 def parse_ipc_symbol(

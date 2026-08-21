@@ -2,7 +2,7 @@
 
 Optional one-shot and end-to-end runners that glue stages together.
 
-Prefer thin wrappers that call into `scrape/` and `classification/` modules rather than duplicating logic here.
+Prefer thin wrappers that call into `scrape/`, `classification/`, `instruction-generation/`, `dataset-validation/`, and `evaluation/` modules rather than duplicating logic here.
 
 | Script | Calls | Purpose |
 |--------|-------|---------|
@@ -14,6 +14,9 @@ Prefer thin wrappers that call into `scrape/` and `classification/` modules rath
 | `export_patent_text_csvs.py` | (standalone; uses `jsonl_gz`) | Clean shards → `abstracts.csv` + `first_claims.csv` + `claims.csv` under `data/derived/patent_search_text/` |
 | `download_patentbert.py` | `classification/src/download_patentbert.py` | Fetch PatentBERT checkpoint → `classification/models/patentbert/` |
 | `run_patentbert.py` | `classification/src/run_patentbert.py` | Claim-level CPC-subclass inference → `data/derived/patentbert/predictions.csv` |
+| `split_eval_data.py` | `evaluation/src/split.py` | Freeze temporal train/val/test + 3-shot exemplars → `data/derived/evaluation/splits/` |
+| `run_baselines.py` | `evaluation/src/run_baseline.py` | OpenRouter zero-shot / 3-shot on frozen test IDs |
+| `score_baselines.py` | `evaluation/src/score.py` | Automatic IPC / abstract / MRC scores → `data/derived/evaluation/scores/` |
 
 ### PatentBERT (requires TF1 env — not root `.venv`)
 
