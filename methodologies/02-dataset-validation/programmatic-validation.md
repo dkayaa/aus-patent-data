@@ -31,7 +31,7 @@ Per record:
 6. `input` parses as `Abstract: …\n\nClaims: …`
 
 ### Light task checks
-* **abstract_drafting:** length sanity vs input
+* **abstract_drafting:** `input` starts like claim 1 (`1.` / `1)`); `output` is not a numbered claim list; abstract token count `<` claims token count (compression inversion); abstract not longer than `max(2 × claims, 50_000)` chars
 * **mrc:** `input` is `Question: …\n\nClaims: …`; question contains `?`; answer shorter than claims
 
 ## Lexical scores
@@ -39,7 +39,7 @@ Per record:
 | Task | Metric | Pair |
 |------|--------|------|
 | `ipc_reasoning` | ROUGE-L F1 | Justification vs WIPO title + definition (floor + copy ceiling). Claims-side ROUGE is recorded, not a fail rule. |
-| `abstract_drafting` | ROUGE-L F1 | abstract (`output`) vs claims (`input`) |
+| `abstract_drafting` | ROUGE-L F1 | abstract (`output`) vs claims (`input`) — recorded, not a fail rule (formula-dense claims break LCS) |
 | `mrc` | Best-span token-F1 | answer vs sliding windows of claims; verbatim containment short-circuits to 1.0 |
 
 Also record: `len_input_tokens`, `len_output_tokens`, `compression_ratio = len_out / len_in`.
@@ -53,7 +53,7 @@ Library: `rouge-score` (ROUGE-L F1).
 | `ipc_reasoning` | Justification vs WIPO title + definition **and** vs claims |
 | `abstract_drafting` | abstract vs claims |
 
-Not computed for `mrc` (short extractive answers vs the full claim set are a weak quality signal). IPC uses two cosine pairs: WIPO grounding (is the rationale about the assigned place) and claims (is it about this invention). A justification that is mostly the WIPO text (ROUGE-L vs title+definition `> 0.60`) fails as a near-copy.
+Not computed for `mrc` (short extractive answers vs the full claim set are a weak quality signal). IPC uses two cosine pairs: WIPO grounding (is the rationale about the assigned place) and claims (is it about this invention). A justification that is mostly the WIPO text (ROUGE-L vs title+definition `> 0.60`) fails as a near-copy. Abstract drafting cosine is pairing only (gold abstract vs claims); official abstracts are not judged for writing quality.
 
 * **Model:** `nomic-ai/nomic-embed-text-v1.5` (8,192-token context; document prefix `search_document:` on both sides)
 * **Score:** cosine similarity of mean-pooled embeddings
@@ -62,7 +62,7 @@ Not computed for `mrc` (short extractive answers vs the full claim set are a wea
 ## Soft floors (quarantine)
 Fail only if:
 * IPC reasoning: WIPO cosine `< 0.55` or WIPO ROUGE-L F1 `< 0.08` or `> 0.60` (near-copy), or claims cosine `< 0.50`, or
-* abstract drafting: semantic cosine `< 0.15` or ROUGE-L F1 `< 0.02`, or
+* abstract drafting: Nomic cosine `< 0.40` (topic mismatch). ROUGE is not a fail rule. Compression inversion (`abstract` tokens `>=` claims tokens) is a structural fail (`abstract_not_shorter_than_claims`), or
 * MRC: best-span token-F1 `< 0.5`
 
 Borderline scores remain in the pass set with `meta.validation` filled in.

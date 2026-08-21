@@ -217,6 +217,7 @@ def main(argv: list[str] | None = None) -> int:
         "ipc_wipo_rouge_l_f1_min": float(floor_cfg.get("ipc_wipo_rouge_l_f1_min", 0.08)),
         "ipc_wipo_rouge_l_f1_max": float(floor_cfg.get("ipc_wipo_rouge_l_f1_max", 0.60)),
         "ipc_claims_cosine_min": float(floor_cfg.get("ipc_claims_cosine_min", 0.50)),
+        "abstract_cosine_min": float(floor_cfg.get("abstract_cosine_min", 0.40)),
     }
 
     if args.input_dir is not None or args.output_dir is not None:

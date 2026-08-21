@@ -149,6 +149,7 @@ def score_record(
     ipc_rouge_min = float(floors.get("ipc_wipo_rouge_l_f1_min", 0.08))
     ipc_rouge_max = float(floors.get("ipc_wipo_rouge_l_f1_max", 0.60))
     ipc_claims_cos_min = float(floors.get("ipc_claims_cosine_min", 0.50))
+    abstract_cos_min = float(floors.get("abstract_cosine_min", 0.40))
 
     if task == "mrc":
         span_f1 = metrics["best_span_f1"]
@@ -166,6 +167,10 @@ def score_record(
         claims_cos = metrics["claims_semantic_cosine"]
         if claims_cos is not None and claims_cos < ipc_claims_cos_min:
             failed.append("claims_cosine_below_floor")
+    elif task == "abstract_drafting":
+        cos = metrics["semantic_cosine"]
+        if cos is not None and cos < abstract_cos_min:
+            failed.append("abstract_cosine_below_floor")
     else:
         cos = metrics["semantic_cosine"]
         if cos is not None and cos < cos_min:

@@ -49,6 +49,14 @@ def check_task_light(record: dict[str, Any]) -> list[str]:
     if task == "abstract_drafting":
         if len(output) > max(len(input_text) * 2, 50_000):
             failures.append("output_too_long_vs_input")
+        if not looks_like_claim_start(input_text):
+            failures.append("abstract_input_not_claims")
+        if looks_like_numbered_claims(output):
+            failures.append("abstract_output_looks_like_claims")
+        n_in = len(simple_tokenize(input_text))
+        n_out = len(simple_tokenize(output))
+        if n_in and n_out >= n_in:
+            failures.append("abstract_not_shorter_than_claims")
 
     if task == "ipc_reasoning":
         abstract, claims = parse_ipc_input(input_text)
@@ -104,3 +112,19 @@ def parse_ipc_input(input_text: str) -> tuple[str | None, str | None]:
 
 def simple_tokenize(text: str) -> list[str]:
     return [t for t in re.split(r"\s+", text.strip().lower()) if t]
+
+
+_CLAIM_START_RE = re.compile(r"^\s*1\s*[\.\)]")
+_CLAIM_SECOND_RE = re.compile(r"\n\s*2\s*[\.\)]")
+
+
+def looks_like_claim_start(text: str) -> bool:
+    """True if ``text`` begins like claim 1 (``1.`` / ``1)``)."""
+    return bool(_CLAIM_START_RE.match(text or ""))
+
+
+def looks_like_numbered_claims(text: str) -> bool:
+    """True if ``text`` looks like a multi-claim list (swap detection)."""
+    if not looks_like_claim_start(text):
+        return False
+    return bool(_CLAIM_SECOND_RE.search(text or ""))

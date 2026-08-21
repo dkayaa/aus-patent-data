@@ -29,6 +29,8 @@ floors:
   ipc_wipo_rouge_l_f1_max: 0.60
   # Secondary pair: justification vs claims (not definition-only)
   ipc_claims_cosine_min: 0.50
+  # abstract_drafting: gold abstract vs claims (pairing, not writing quality)
+  abstract_cosine_min: 0.40
 
 run:
   shard_size: 100

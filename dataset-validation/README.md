@@ -4,7 +4,7 @@ Validation of seed instruction JSONL after `instruction-generation/`.
 
 | Mode | What | Entry |
 |------|------|--------|
-| **1** Programmatic | Schema/IPC (incl. WIPO catalog), ROUGE-L, MRC best-span F1, Nomic Embed cosine (IPC vs WIPO definition; abstract vs claims) | `scripts/validate_instruction_data.py` |
+| **1** Programmatic | Schema/IPC (WIPO catalog), ROUGE-L, MRC best-span F1, Nomic cosine (IPC vs WIPO + claims; abstract vs claims pairing) | `scripts/validate_instruction_data.py` |
 | **2** LLM-as-a-judge | Sample Mode 1 `passed/` rows; pointwise 1–5 scores via OpenRouter | `scripts/judge_instruction_data.py` |
 
 Methodology: [`methodologies/02-dataset-validation/`](../methodologies/02-dataset-validation/).
