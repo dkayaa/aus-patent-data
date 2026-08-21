@@ -20,3 +20,5 @@ judge:
   seed: 42
   truncate_chars: 12000
   shard_size: 50
+  # Concurrent judge LLM calls. Keep 1 for a serial local server; 8–16 is typical for OpenRouter.
+  workers: 12

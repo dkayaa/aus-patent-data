@@ -47,6 +47,10 @@ set -a && source .env && set +a
 .venv/bin/python scripts/judge_instruction_data.py --task mrc \
   --generator anthropic/claude-sonnet-4.6 \
   --provider openrouter --model anthropic/claude-sonnet-4.6
+
+# Concurrent OpenRouter calls (same --workers pattern as instruction generation)
+.venv/bin/python scripts/judge_instruction_data.py --all --limit 50 \
+  --generator meta-llama/llama-3.3-70b-instruct --workers 12
 ```
 
 Requires `OPENROUTER_API_KEY` in the environment (load `.env` as above). `--generator` selects whose Mode 1 `passed/` rows to grade (same default as Mode 1: the only generator dir). `--model` is the *judge* LLM. Resume via `{model_slug}/<task>/llm_judge/done_ids.txt`.

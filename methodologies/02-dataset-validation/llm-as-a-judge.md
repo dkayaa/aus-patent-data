@@ -23,6 +23,7 @@ Optional complementary rubric style: Liu et al., *G-Eval* (EMNLP 2023) — step-
 set -a && source .env && set +a
 .venv/bin/python scripts/judge_instruction_data.py --task ipc_reasoning
 .venv/bin/python scripts/judge_instruction_data.py --all --limit 50
+.venv/bin/python scripts/judge_instruction_data.py --all --limit 50 --workers 12
 ```
 
 Implementation: `dataset-validation/` (`config/llm_judge.yaml`, `src/run_llm_judge.py`, `src/judge_prompts.py`). Outputs: `{model_slug}/<task>/llm_judge/{passed,rejected,report.json,done_ids.txt}`.

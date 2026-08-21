@@ -9,6 +9,7 @@ import logging
 import statistics
 import sys
 from collections import Counter
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -25,7 +26,7 @@ if str(IG_SRC) not in sys.path:
     sys.path.insert(0, str(IG_SRC))
 
 from holdings import resolve_generator_dir  # noqa: E402
-from io_util import ShardWriter, iter_task_records  # noqa: E402
+from io_util import ShardWriter, iter_task_records, write_jsonl_gz  # noqa: E402
 from judge_prompts import (  # noqa: E402
     TASKS,
     build_judge_messages,
@@ -104,6 +105,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override LLM provider (default: openrouter from config)",
     )
     p.add_argument("--model", type=str, default=None, help="Override judge model")
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help=(
+            "Concurrent judge LLM calls (default: judge.workers in YAML, else 1). "
+            "Use >1 for OpenRouter; keep 1 for a serial local server."
+        ),
+    )
     return p
 
 
@@ -123,11 +133,54 @@ def _next_shard_index(out_dir: Path) -> int:
 
 
 class ResumableShardWriter(ShardWriter):
-    """ShardWriter that continues numbering after existing shards."""
+    """ShardWriter that continues numbering after existing shards.
+
+    Rewrites the in-progress shard on each add so a crash cannot leave
+    done_ids pointing at records that were never flushed.
+    """
 
     def __init__(self, out_dir: Path, *, shard_size: int = 100) -> None:
         super().__init__(out_dir, shard_size=shard_size)
         self._index = _next_shard_index(out_dir)
+
+    def add(self, record: dict[str, Any]) -> None:
+        self._buffer.append(record)
+        self.n_written += 1
+        path = self.out_dir / f"part-{self._index:05d}.jsonl.gz"
+        write_jsonl_gz(path, self._buffer)
+        if not self.paths or self.paths[-1] != path:
+            self.paths.append(path)
+        if len(self._buffer) >= self.shard_size:
+            self._index += 1
+            self._buffer.clear()
+
+    def flush(self) -> None:
+        if not self._buffer:
+            return
+        path = self.out_dir / f"part-{self._index:05d}.jsonl.gz"
+        write_jsonl_gz(path, self._buffer)
+        if not self.paths or self.paths[-1] != path:
+            self.paths.append(path)
+        self._index += 1
+        self._buffer.clear()
+
+
+def _try_judge(
+    client: LLMClient,
+    rec: dict[str, Any],
+    *,
+    truncate_chars: int,
+    pass_score_min: int,
+) -> tuple[dict[str, Any], dict[str, Any] | None, BaseException | None]:
+    try:
+        messages = build_judge_messages(rec, truncate_chars=truncate_chars)
+        raw = chat_json(client, messages, expect=dict)
+        if not isinstance(raw, dict):
+            raise ValueError(f"expected dict, got {type(raw)}")
+        result = normalize_judge_result(raw, pass_score_min=pass_score_min)
+        return rec, result, None
+    except Exception as exc:  # noqa: BLE001 — continue like generation
+        return rec, None, exc
 
 
 def judge_task(
@@ -141,6 +194,7 @@ def judge_task(
     pass_score_min: int,
     truncate_chars: int,
     shard_size: int,
+    workers: int,
 ) -> dict[str, Any]:
     if not input_dir.is_dir():
         raise FileNotFoundError(f"Mode 1 passed dir missing: {input_dir}")
@@ -155,6 +209,7 @@ def judge_task(
         seed=seed,
         skip_ids=done_ids,
     )
+    workers = max(1, int(workers))
 
     log.info(
         "%s: %d Mode1 passed, %d already judged, sampling %d new (target %d)",
@@ -164,6 +219,8 @@ def judge_task(
         len(to_judge),
         sample_size,
     )
+    if workers > 1:
+        log.info("%s: workers=%d", task_id, workers)
 
     passed_writer = ResumableShardWriter(output_dir / "passed", shard_size=shard_size)
     rejected_writer = ResumableShardWriter(output_dir / "rejected", shard_size=shard_size)
@@ -183,18 +240,21 @@ def judge_task(
         except json.JSONDecodeError:
             prev = {}
 
-    for rec in to_judge:
+    def _record_verdict(
+        rec: dict[str, Any],
+        result: dict[str, Any] | None,
+        err: BaseException | None,
+    ) -> None:
+        nonlocal n_pass, n_fail, n_errors
         app = str(rec.get("application_number") or "").strip()
-        try:
-            messages = build_judge_messages(rec, truncate_chars=truncate_chars)
-            raw = chat_json(client, messages, expect=dict)
-            if not isinstance(raw, dict):
-                raise ValueError(f"expected dict, got {type(raw)}")
-            result = normalize_judge_result(raw, pass_score_min=pass_score_min)
-        except Exception as exc:  # noqa: BLE001 — continue like generation
+        if err is not None:
             n_errors += 1
-            log.warning("%s %s: judge error: %s", task_id, app, exc)
-            continue
+            log.warning("%s %s: judge error: %s", task_id, app, err)
+            return
+        if result is None:
+            n_errors += 1
+            log.warning("%s %s: judge error: empty result", task_id, app)
+            return
 
         out = deepcopy(rec)
         meta = out.get("meta") if isinstance(out.get("meta"), dict) else {}
@@ -218,6 +278,28 @@ def judge_task(
             rejected_writer.add(out)
 
         append_done_id(output_dir, app)
+        n_ok = n_pass + n_fail
+        if n_ok % 10 == 0:
+            log.info("%s: judged %d…", task_id, n_ok)
+
+    if workers == 1:
+        for rec in to_judge:
+            rec, result, err = _try_judge(
+                client,
+                rec,
+                truncate_chars=truncate_chars,
+                pass_score_min=pass_score_min,
+            )
+            _record_verdict(rec, result, err)
+    else:
+        _judge_parallel(
+            to_judge,
+            client=client,
+            truncate_chars=truncate_chars,
+            pass_score_min=pass_score_min,
+            workers=workers,
+            record_verdict=_record_verdict,
+        )
 
     passed_writer.flush()
     rejected_writer.flush()
@@ -252,6 +334,7 @@ def judge_task(
         "pass_score_min": pass_score_min,
         "judge_model": client.config.model,
         "judge_provider": client.config.provider,
+        "workers": workers,
         "failure_tag_counts": dict(merged_tags.most_common()),
         "input_dir": str(input_dir),
         "output_dir": str(output_dir),
@@ -273,6 +356,60 @@ def judge_task(
     return report
 
 
+def _judge_parallel(
+    to_judge: list[dict[str, Any]],
+    *,
+    client: LLMClient,
+    truncate_chars: int,
+    pass_score_min: int,
+    workers: int,
+    record_verdict: Any,
+) -> None:
+    pending = iter(to_judge)
+    exhausted = False
+    inflight: dict[
+        Future[tuple[dict[str, Any], dict[str, Any] | None, BaseException | None]],
+        dict[str, Any],
+    ] = {}
+    target_inflight = workers * 3
+
+    def _submit(executor: ThreadPoolExecutor) -> bool:
+        nonlocal exhausted
+        if exhausted:
+            return False
+        try:
+            rec = next(pending)
+        except StopIteration:
+            exhausted = True
+            return False
+        fut = executor.submit(
+            _try_judge,
+            client,
+            rec,
+            truncate_chars=truncate_chars,
+            pass_score_min=pass_score_min,
+        )
+        inflight[fut] = rec
+        return True
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        while True:
+            while not exhausted and len(inflight) < target_inflight:
+                if not _submit(executor):
+                    break
+            if not inflight:
+                break
+            finished, _ = wait(inflight, return_when=FIRST_COMPLETED)
+            for fut in finished:
+                rec = inflight.pop(fut)
+                try:
+                    rec, result, err = fut.result()
+                except Exception as exc:  # noqa: BLE001
+                    record_verdict(rec, None, exc)
+                    continue
+                record_verdict(rec, result, err)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     cfg = load_config(_resolve(args.config) if not args.config.is_absolute() else args.config)
@@ -289,6 +426,8 @@ def main(argv: list[str] | None = None) -> int:
     pass_score_min = int(judge_cfg.get("pass_score_min", 4))
     truncate_chars = int(judge_cfg.get("truncate_chars", 12000))
     shard_size = int(judge_cfg.get("shard_size", 50))
+    workers = args.workers if args.workers is not None else judge_cfg.get("workers")
+    workers = max(1, int(workers or 1))
 
     overrides: dict[str, Any] = {}
     if args.provider:
@@ -297,7 +436,7 @@ def main(argv: list[str] | None = None) -> int:
         overrides["model"] = args.model
     llm_cfg = llm_config_from_dict(llm_raw, overrides=overrides)
     client = LLMClient(llm_cfg)
-    log.info("Judge provider=%s model=%s", llm_cfg.provider, llm_cfg.model)
+    log.info("Judge provider=%s model=%s workers=%s", llm_cfg.provider, llm_cfg.model, workers)
 
     if args.input_dir or args.output_dir:
         if args.all or not args.task:
@@ -342,6 +481,7 @@ def main(argv: list[str] | None = None) -> int:
                     pass_score_min=pass_score_min,
                     truncate_chars=truncate_chars,
                     shard_size=shard_size,
+                    workers=workers,
                 )
             )
         except FileNotFoundError as exc:
