@@ -24,6 +24,7 @@ IG_SRC = REPO_ROOT / "instruction-generation" / "src"
 if str(IG_SRC) not in sys.path:
     sys.path.insert(0, str(IG_SRC))
 
+from holdings import resolve_generator_dir  # noqa: E402
 from io_util import ShardWriter, iter_task_records  # noqa: E402
 from judge_prompts import (  # noqa: E402
     TASKS,
@@ -75,6 +76,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Override sample_size per task (default from YAML)",
+    )
+    p.add_argument(
+        "--generator",
+        default=None,
+        help=(
+            "Generator model id or slug under input_root "
+            "(default: the only generator dir, error if several)"
+        ),
     )
     p.add_argument(
         "--input-dir",
@@ -300,18 +309,27 @@ def main(argv: list[str] | None = None) -> int:
     else:
         tasks = [args.task]
 
+    gen_dir: Path | None = None
+    if args.input_dir is None or args.output_dir is None:
+        try:
+            gen_dir = resolve_generator_dir(input_root, generator=args.generator)
+        except (FileNotFoundError, ValueError) as exc:
+            log.error("%s", exc)
+            return 1
+        log.info("Generator: %s", gen_dir.name)
+
     reports: list[dict[str, Any]] = []
     for task_id in tasks:
-        in_dir = (
-            _resolve(args.input_dir)
-            if args.input_dir
-            else input_root / task_id / "passed"
-        )
-        out_dir = (
-            _resolve(args.output_dir)
-            if args.output_dir
-            else output_root / task_id / "llm_judge"
-        )
+        if args.input_dir:
+            in_dir = _resolve(args.input_dir)
+        else:
+            assert gen_dir is not None
+            in_dir = gen_dir / task_id / "passed"
+        if args.output_dir:
+            out_dir = _resolve(args.output_dir)
+        else:
+            assert gen_dir is not None
+            out_dir = gen_dir / task_id / "llm_judge"
         try:
             reports.append(
                 judge_task(
@@ -330,7 +348,8 @@ def main(argv: list[str] | None = None) -> int:
             log.error("%s", exc)
             return 1
 
-    summary_path = output_root / "llm_judge_summary.json"
+    summary_dir = gen_dir if gen_dir is not None else output_root
+    summary_path = summary_dir / "llm_judge_summary.json"
     summary = {
         "tasks": [
             {

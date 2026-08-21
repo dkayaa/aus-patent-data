@@ -1,9 +1,9 @@
 # Mode 2 LLM-as-a-judge (sample of Mode 1 passed rows).
 
 paths:
-  # Read <task>/passed/ from Mode 1
+  # Read {model_slug}/<task>/passed/ from Mode 1
   input_root: data/derived/instruction_generation_validation
-  # Write <task>/llm_judge/{passed,rejected,report.json,done_ids.txt}
+  # Write {model_slug}/<task>/llm_judge/{passed,rejected,report.json,done_ids.txt}
   output_root: data/derived/instruction_generation_validation
 
 llm:

@@ -13,7 +13,7 @@ Task methodologies: `methodologies/01-instruction-data-generation/`.
 
 ## Outputs
 
-`data/derived/instruction_generation/<task>/part-*.jsonl.gz` plus `done_ids.txt` for resume.
+`data/derived/instruction_generation/{model_slug}/<task>/part-*.jsonl.gz` plus `done_ids.txt` for resume. The slug is derived from `--model` (e.g. `anthropic/claude-sonnet-4.6` → `anthropic-claude-sonnet-4.6`, `llama3.1:8b` → `llama3.1-8b`). Each generator also gets `manifest.json`. Instruction pools stay shared at `_pools/`.
 
 Alpaca-style records: `task`, `application_number`, `instruction`, `input`, `output`, `meta`.
 
@@ -40,16 +40,16 @@ Same client code path; swap via YAML or CLI flags.
 # from repo root, with .venv active
 pip install -r requirements.txt
 
-# local Llama (default config)
+# local Llama (default config) → data/derived/instruction_generation/llama3.1-8b/
 .venv/bin/python scripts/generate_instruction_data.py --task ipc_reasoning --limit 20
 
 # all three tasks
 .venv/bin/python scripts/generate_instruction_data.py --all --limit 50
 
-# OpenRouter
+# OpenRouter → data/derived/instruction_generation/anthropic-claude-sonnet-4.6/
 export OPENROUTER_API_KEY='...'
 .venv/bin/python scripts/generate_instruction_data.py \
-  --task mrc --provider openrouter --model meta-llama/llama-3.1-8b-instruct --limit 10
+  --task mrc --provider openrouter --model anthropic/claude-sonnet-4.6 --limit 10
 ```
 
-Instruction pools (diversified phrasings for a fixed task) are generated once per task and cached under `data/derived/instruction_generation/_pools/`. See `methodologies/01-instruction-data-generation/` for the full workflow.
+Instruction pools (diversified phrasings for a fixed task) are generated once per task and cached under `data/derived/instruction_generation/_pools/`. Reused across generators so smoke tests are comparable. See `methodologies/01-instruction-data-generation/` for the full workflow.

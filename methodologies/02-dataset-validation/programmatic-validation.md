@@ -5,7 +5,7 @@
 Apply cheap, deterministic checks **and** lexical/semantic scores to seed instruction JSONL before LLM/human review. Hard-fail on schema/IPC errors and very low score floors; otherwise keep examples with scores attached for later stages.
 
 ## Scope
-All three tasks under `data/derived/instruction_generation/<task>/`.
+All three tasks under `data/derived/instruction_generation/{model_slug}/<task>/`.
 
 ## Inputs
 Alpaca-style JSONL (`part-*.jsonl` / `.jsonl.gz`).

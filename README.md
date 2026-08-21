@@ -56,7 +56,7 @@ data/raw/application-toy.csv   (IP Rapid seed: IDs + status/dates)
          scrape/   ── IP Australia API: semantic / textual fields ──►  data/derived/
             │
             ├─► classification/          ── labels / models ──► data/derived/
-            └─► instruction-generation/ ── synthetic SFT JSONL ──► data/derived/instruction_generation/
+            └─► instruction-generation/ ── synthetic SFT JSONL ──► data/derived/instruction_generation/{model_slug}/
 ```
 
 Each stage should use **explicit paths** (config or CLI args).
@@ -106,8 +106,8 @@ aus-patent-data/
 - Patent Search API enrichment: `scrape/src/patent_search.py` → `part-*.jsonl.gz` shards under the configured `patent_search` output dir.
 - Patent Search clean: `scrape/src/clean_patent_search.py` → mirrored `part-*.jsonl.gz` under `data/derived/patent_search_clean/`.
 - Classification: PatentBERT claim-level CPC-subclass inference (`classification/src/run_patentbert.py` → `data/derived/patentbert/`).
-- Instruction generation: synthetic SFT JSONL (`instruction-generation/` → `data/derived/instruction_generation/`).
-- Dataset validation: Mode 1 `scripts/validate_instruction_data.py`; Mode 2 sample judge `scripts/judge_instruction_data.py` → `data/derived/instruction_generation_validation/`.
+- Instruction generation: synthetic SFT JSONL (`instruction-generation/` → `data/derived/instruction_generation/{model_slug}/`).
+- Dataset validation: Mode 1 `scripts/validate_instruction_data.py`; Mode 2 sample judge `scripts/judge_instruction_data.py` → `data/derived/instruction_generation_validation/{model_slug}/`.
 
 ## Reproduction (partial)
 

@@ -15,7 +15,7 @@ They show strong LLM judges can reach ~human–human agreement levels on open-en
 Optional complementary rubric style: Liu et al., *G-Eval* (EMNLP 2023) — step-by-step criteria then score — useful when we want dimensioned rubrics rather than a single preference vote.
 
 ## Scope
-**Sample-based by default** (not a full-corpus judge pass): Mode 1 survivors at `data/derived/instruction_generation_validation/<task>/passed/`, default `sample_size: 50` per task (`--limit` overrides). Prefer judging after programmatic filters (Mode 1).
+**Sample-based by default** (not a full-corpus judge pass): Mode 1 survivors at `data/derived/instruction_generation_validation/{model_slug}/<task>/passed/`, default `sample_size: 50` per task (`--limit` overrides). Prefer judging after programmatic filters (Mode 1).
 
 ## Run
 
@@ -25,7 +25,7 @@ set -a && source .env && set +a
 .venv/bin/python scripts/judge_instruction_data.py --all --limit 50
 ```
 
-Implementation: `dataset-validation/` (`config/llm_judge.yaml`, `src/run_llm_judge.py`, `src/judge_prompts.py`). Outputs: `<task>/llm_judge/{passed,rejected,report.json,done_ids.txt}`.
+Implementation: `dataset-validation/` (`config/llm_judge.yaml`, `src/run_llm_judge.py`, `src/judge_prompts.py`). Outputs: `{model_slug}/<task>/llm_judge/{passed,rejected,report.json,done_ids.txt}`.
 
 ## Judge setup
 * **Judge model:** frontier via OpenRouter (e.g. `anthropic/claude-sonnet-4.6` or stronger), **different from or at least not weaker than** the generator when possible. Temperature **0**.

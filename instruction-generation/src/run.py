@@ -21,6 +21,13 @@ from assemble import (  # noqa: E402
     load_done_ids,
     task_output_dir,
 )
+from holdings import (  # noqa: E402
+    generator_dir,
+    legacy_task_dirs,
+    model_slug,
+    pools_dir,
+    write_manifest,
+)
 from ipc_lookup import IPCLookup  # noqa: E402
 from llm import LLMClient, llm_config_from_dict  # noqa: E402
 from patents import iter_patent_texts  # noqa: E402
@@ -97,7 +104,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         type=Path,
         default=None,
-        help="Override paths.output_dir",
+        help=(
+            "Override generator dir (default: "
+            "{paths.output_dir}/{model_slug})"
+        ),
     )
     return p
 
@@ -109,25 +119,25 @@ def run_task(
     client: LLMClient,
     ipc_lookup: IPCLookup,
     patents_dir: Path,
-    output_root: Path,
+    dest: Path,
+    pools: Path,
     limit: int | None,
 ) -> dict[str, Any]:
     evol_cfg = cfg.get("evol_instruct") or {}
     run_cfg = cfg.get("run") or {}
     shard_size = int(run_cfg.get("shard_size") or 100)
-    pools_dir = output_root / "_pools"
 
     task_cls = TASKS[task_id]
     task = task_cls(
         client,
         ipc_lookup=ipc_lookup,
         evol_cfg=evol_cfg,
-        pools_dir=pools_dir,
+        pools_dir=pools,
     )
     print(f"[{task_id}] setup…", flush=True)
     task.setup()
 
-    task_dir = task_output_dir(output_root, task_id)
+    task_dir = task_output_dir(dest, task_id)
     done = load_done_ids(task_dir)
     writer = ShardWriter(task_dir, shard_size=shard_size)
 
@@ -190,10 +200,18 @@ def main(argv: list[str] | None = None) -> int:
         args.ipc_jsonl
         or Path(paths.get("ipc_jsonl") or "data/ipc-codes/ipc_codes_20260101.jsonl")
     )
-    output_root = _resolve(
-        args.output_dir
-        or Path(paths.get("output_dir") or "data/derived/instruction_generation")
+    holdings_root = _resolve(
+        Path(paths.get("output_dir") or "data/derived/instruction_generation")
     )
+    leftover = legacy_task_dirs(holdings_root)
+    if leftover:
+        print(
+            f"error: legacy task dirs still at {holdings_root}: "
+            f"{', '.join(leftover)}. Move them under "
+            f"{holdings_root}/<model-slug>/.",
+            file=sys.stderr,
+        )
+        return 1
 
     if not patents_dir.is_dir():
         print(f"error: patents dir missing: {patents_dir}", file=sys.stderr)
@@ -210,12 +228,31 @@ def main(argv: list[str] | None = None) -> int:
             "base_url": args.base_url,
         },
     )
+    dest = (
+        _resolve(args.output_dir)
+        if args.output_dir is not None
+        else generator_dir(holdings_root, llm_cfg.model)
+    )
+    shared_pools = pools_dir(holdings_root)
+    write_manifest(
+        dest,
+        {
+            "slug": model_slug(llm_cfg.model),
+            "provider": llm_cfg.provider,
+            "model": llm_cfg.model,
+            "base_url": llm_cfg.base_url,
+            "temperature": llm_cfg.temperature,
+            "max_tokens": llm_cfg.max_tokens,
+        },
+    )
     client = LLMClient(llm_cfg)
     print(
         f"LLM provider={llm_cfg.provider} model={llm_cfg.model} "
         f"base_url={llm_cfg.base_url}",
         flush=True,
     )
+    print(f"Generator dir: {dest}", flush=True)
+    print(f"Shared pools: {shared_pools}", flush=True)
 
     print(f"Loading IPC catalog: {ipc_jsonl}", flush=True)
     ipc_lookup = IPCLookup.from_jsonl(ipc_jsonl)
@@ -235,12 +272,13 @@ def main(argv: list[str] | None = None) -> int:
             client=client,
             ipc_lookup=ipc_lookup,
             patents_dir=patents_dir,
-            output_root=output_root,
+            dest=dest,
+            pools=shared_pools,
             limit=limit,
         )
         all_stats.append(stats)
 
-    print(f"Finished {len(all_stats)} task(s) → {output_root}", flush=True)
+    print(f"Finished {len(all_stats)} task(s) → {dest}", flush=True)
     return 0
 
 

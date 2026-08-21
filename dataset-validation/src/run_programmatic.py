@@ -22,6 +22,12 @@ from io_util import ShardWriter, iter_task_records  # noqa: E402
 from semantic import SemanticScorer  # noqa: E402
 from task_metrics import TASKS, score_record  # noqa: E402
 
+IG_SRC = REPO_ROOT / "instruction-generation" / "src"
+if str(IG_SRC) not in sys.path:
+    sys.path.insert(0, str(IG_SRC))
+
+from holdings import resolve_generator_dir  # noqa: E402
+
 DEFAULT_CONFIG = REPO_ROOT / "dataset-validation" / "config" / "programmatic.yaml"
 
 
@@ -54,6 +60,14 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--task", choices=list(TASKS), help="Validate one task")
     group.add_argument("--all", action="store_true", help="Validate all tasks")
     p.add_argument("--limit", type=int, default=None, help="Max records per task")
+    p.add_argument(
+        "--generator",
+        default=None,
+        help=(
+            "Generator model id or slug under input_root "
+            "(default: the only generator dir, error if several)"
+        ),
+    )
     p.add_argument(
         "--input-dir",
         type=Path,
@@ -209,19 +223,30 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
 
+    gen_in: Path | None = None
+    gen_out: Path | None = None
+    if args.input_dir is None or args.output_dir is None:
+        try:
+            gen_in = resolve_generator_dir(input_root, generator=args.generator)
+        except (FileNotFoundError, ValueError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        gen_out = output_root / gen_in.name
+        print(f"Generator: {gen_in.name}", flush=True)
+
     task_ids = list(TASKS) if args.all else [args.task]
     reports = []
     for task_id in task_ids:
-        in_dir = (
-            _resolve(args.input_dir)
-            if args.input_dir is not None
-            else input_root / task_id
-        )
-        out_dir = (
-            _resolve(args.output_dir)
-            if args.output_dir is not None
-            else output_root / task_id
-        )
+        if args.input_dir is not None:
+            in_dir = _resolve(args.input_dir)
+        else:
+            assert gen_in is not None
+            in_dir = gen_in / task_id
+        if args.output_dir is not None:
+            out_dir = _resolve(args.output_dir)
+        else:
+            assert gen_out is not None
+            out_dir = gen_out / task_id
         if not in_dir.is_dir():
             print(f"[{task_id}] skip: missing input {in_dir}", flush=True)
             continue

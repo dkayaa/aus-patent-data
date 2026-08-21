@@ -42,6 +42,9 @@ Scrapers use `application_number` (and related IDs) to pull semantic text from t
 | `derived/patent_search_clean/` (or `scrape/config/clean_patent_search.yaml` → `paths.output_dir`) | `scrape/src/clean_patent_search.py` | Flattened records with parsed claims (`part-*.jsonl.gz`) |
 | `derived/patent_search_text/` | `scripts/export_patent_text_csvs.py` | Classification-oriented CSVs: `abstracts.csv`, `first_claims.csv`, `claims.csv` |
 | `derived/patentbert/` | `scripts/run_patentbert.py` | Claim-level PatentBERT CPC-subclass predictions (`input.tsv[.gz]`, `row_map.csv[.gz]`, `predict_result.txt[.gz]`, `predictions.csv[.gz]`) |
+| `derived/instruction_generation/_pools/` | `scripts/generate_instruction_data.py` | Shared Evol-Instruct instruction phrasings (not per-model) |
+| `derived/instruction_generation/{model_slug}/` | `scripts/generate_instruction_data.py` | Per-generator SFT JSONL: `manifest.json` + `<task>/part-*.jsonl.gz` + `done_ids.txt` |
+| `derived/instruction_generation_validation/{model_slug}/` | `scripts/validate_instruction_data.py`, `scripts/judge_instruction_data.py` | Mode 1 `passed/`/`rejected/` + Mode 2 `llm_judge/` per task |
 
 ### `patent_search` / `patent_search_clean` storage
 

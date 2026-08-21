@@ -39,7 +39,7 @@ Task-specific (1–5):
 2. Double-annotate ~30% of the audit set; single-annotate the rest.
 3. Compute Cohen’s κ or % agreement on Accept; discuss disagreements.
 4. Compare human Accept vs LLM-judge `pass` (Mode 2) → set operating threshold / report confusion matrix.
-5. Freeze the audited labels as `data/derived/instruction_generation_validation/human_audit.jsonl`.
+5. Freeze the audited labels as `data/derived/instruction_generation_validation/{model_slug}/human_audit.jsonl`.
 
 ### What to report in the paper
 * Human accept rate by task

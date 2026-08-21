@@ -5,7 +5,7 @@
 Adapt one or more open-source instruction-capable LLMs on the validated Australian patent SFT corpus so they improve on the three seed tasks (IPC reasoning, abstract drafting, MRC) relative to their untuned base and to external baselines.
 
 ## Inputs
-* Train / validation rows from `data/derived/instruction_generation_validation/<task>/passed/` (and any human-audited or judge-filtered subsets once frozen).
+* Train / validation rows from `data/derived/instruction_generation_validation/{model_slug}/<task>/passed/` (and any human-audited or judge-filtered subsets once frozen).
 * Alpaca-style fields: `instruction`, `input`, `output` (plus `task`, `application_number`, `meta` for stratification and leakage control).
 
 ## Student models (candidates)

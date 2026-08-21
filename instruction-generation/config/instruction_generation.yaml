@@ -3,6 +3,8 @@
 paths:
   patents_dir: data/derived/patent_search_clean
   ipc_jsonl: data/ipc-codes/ipc_codes_20260101.jsonl
+  # Holdings root. Records go to {output_dir}/{model_slug}/<task>/;
+  # instruction pools stay at {output_dir}/_pools/ (shared across generators).
   output_dir: data/derived/instruction_generation
 
 llm:

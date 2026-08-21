@@ -16,12 +16,16 @@ Methodology: [`methodologies/02-dataset-validation/`](../methodologies/02-datase
 
 .venv/bin/python scripts/validate_instruction_data.py --task ipc_reasoning
 .venv/bin/python scripts/validate_instruction_data.py --all --limit 100
+.venv/bin/python scripts/validate_instruction_data.py --all \
+  --generator anthropic/claude-sonnet-4.6
 
 # lexical/structural only (no embedding download)
 .venv/bin/python scripts/validate_instruction_data.py --task mrc --skip-semantic
 ```
 
-Outputs under `data/derived/instruction_generation_validation/<task>/`:
+Reads `data/derived/instruction_generation/{model_slug}/<task>/`. If several generators exist, pass `--generator` (model id or slug). With one generator, that one is used.
+
+Outputs under `data/derived/instruction_generation_validation/{model_slug}/<task>/`:
 
 | Path | Content |
 |------|---------|
@@ -41,10 +45,11 @@ set -a && source .env && set +a
 .venv/bin/python scripts/judge_instruction_data.py --task ipc_reasoning
 .venv/bin/python scripts/judge_instruction_data.py --all --limit 50
 .venv/bin/python scripts/judge_instruction_data.py --task mrc \
+  --generator anthropic/claude-sonnet-4.6 \
   --provider openrouter --model anthropic/claude-sonnet-4.6
 ```
 
-Requires `OPENROUTER_API_KEY` in the environment (load `.env` as above). Resume via `<task>/llm_judge/done_ids.txt`.
+Requires `OPENROUTER_API_KEY` in the environment (load `.env` as above). `--generator` selects whose Mode 1 `passed/` rows to grade (same default as Mode 1: the only generator dir). `--model` is the *judge* LLM. Resume via `{model_slug}/<task>/llm_judge/done_ids.txt`.
 
 | Path | Content |
 |------|---------|
