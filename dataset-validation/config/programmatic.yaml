@@ -9,16 +9,20 @@ paths:
   ipc_jsonl: data/ipc-codes/ipc_codes_20260101.jsonl
 
 semantic:
-  model_name: nomic-ai/nomic-embed-text-v1.5
+  # Key into config/embedding_models.yaml (minilm | granite | granite_small | nomic).
+  # Default nomic to match main's MiniLM→8k migration; granite* remain available.
+  # Registry asserts runtime max_seq_length; chunking covers text still over window.
+  embedding_model: nomic
   batch_size: 8
-  # Trained to 8192 (RoPE). MiniLM's 256/512 window truncated most claim bundles.
-  max_seq_length: 8192
-  trust_remote_code: true
-  # Document–document relatedness (Nomic task prefixes are required).
-  prefix_a: "search_document: "
-  prefix_b: "search_document: "
+  # Chunking fallback when source text exceeds the model's runtime max_seq_length.
+  # AlignScore (arXiv 2305.16739) chunks sources into ~350-token overlapping windows
+  # and takes the max; Patent-CE (arXiv 2505.11095) chose Longformer at 4096 because
+  # patent claim sets average over 1000 tokens. We embed whole when it fits; otherwise
+  # overlapping windows at ~25% overlap, pass/fail on cosine_max.
+  chunk_overlap_frac: 0.25
 
 floors:
+  # Do not change these thresholds without an explicit team decision.
   semantic_cosine_min: 0.15
   rouge_l_f1_min: 0.02
   mrc_best_span_f1_min: 0.5
@@ -31,6 +35,33 @@ floors:
   ipc_claims_cosine_min: 0.50
   # abstract_drafting: gold abstract vs claims (pairing, not writing quality)
   abstract_cosine_min: 0.40
+
+terms_coverage:
+  # Additive metric only — not a pass/fail gate.
+  # Zuo et al., PatentEval, NAACL 2024, Table 3: Terms Coverage reached Kendall
+  # tau 0.287 vs patent expert judgement on claims-to-abstract, highest of six
+  # metrics tested (above two BERT-for-Patents semantic variants at 0.266/0.256).
+  enabled: true
+  boilerplate_config: dataset-validation/config/terms_boilerplate.yaml
+
+faithfulness:
+  # Additive, ipc_reasoning only — never a pass/fail gate.
+  # MiniCheck-Flan-T5-Large (MIT). Do not use Bespoke-MiniCheck-7B (CC BY-NC).
+  # Install: pip install "minicheck @ git+https://github.com/Liyan06/MiniCheck.git@main"
+  # Off by default in Mode 1 CLI (slow); enable via --faithfulness or the
+  # dedicated scripts/run_faithfulness_ipc.py report runner.
+  #
+  # Design: atomicize → drop META (alignment markers / zero claim terms)
+  # *before* MiniCheck → score combined doc → three-way band:
+  #   SUPPORTED P>=support_high, UNDECIDED mid, UNSUPPORTED P<support_low.
+  # Wrong-bridge (true facts, wrong classifying feature) is expert audit.
+  enabled: false
+  model_name: flan-t5-large
+  cache_dir: ckpts
+  batch_size: 8
+  support_high: 0.7
+  support_low: 0.3
+  score_halves: false
 
 run:
   shard_size: 100

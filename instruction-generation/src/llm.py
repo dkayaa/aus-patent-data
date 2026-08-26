@@ -1,4 +1,16 @@
-"""OpenAI-compatible chat client (local Llama server or OpenRouter)."""
+"""OpenAI-compatible chat client (local Ollama native API or OpenRouter).
+
+Local provider uses Ollama's native ``/api/chat`` rather than the OpenAI
+``/v1`` shim: empirically (2026-08-20) ``extra_body.options.num_ctx`` on the
+OpenAI path does not honour 8192 (effective context stayed 4096), while
+native ``/api/chat`` with ``options.num_ctx`` reports the configured value
+via ``/api/ps``.
+
+Ollama truncation behaviour (scripts/probe_ollama_truncation.py, 2026-08-20):
+when a prompt exceeds num_ctx, Ollama drops the BEGINNING and keeps the end
+(most recent tokens). The prompt_fit module must guarantee we never send an
+over-limit prompt.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +18,8 @@ import json
 import os
 import re
 import threading
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,6 +27,8 @@ from openai import OpenAI
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_API_KEY_ENV = "OPENROUTER_API_KEY"
+
+DEFAULT_NUM_CTX = 8192
 
 
 @dataclass(frozen=True)
@@ -23,6 +39,11 @@ class LLMConfig:
     api_key_env: str
     temperature: float = 0.7
     max_tokens: int = 1024
+    max_output_tokens: int = 1024
+    num_ctx: int = DEFAULT_NUM_CTX
+    safety_margin: int = 64
+    repeat_instruction: bool = True
+    tokenizer_id: str = "NousResearch/Meta-Llama-3-8B"
     timeout_s: float = 120.0
     max_retries: int = 3
 
@@ -66,22 +87,35 @@ def llm_config_from_dict(raw: dict[str, Any], *, overrides: dict[str, Any] | Non
         api_key_env = default_key_env
 
     model = str(ov.get("model") or raw.get("model") or default_model)
-    # If switching provider and model still looks like the other side's default, replace.
     if not ov.get("model") and not provider_unchanged:
         model = default_model
 
     merged = dict(raw)
     merged.update(ov)
+    max_tokens = int(merged.get("max_tokens", 1024))
+    max_output = int(merged.get("max_output_tokens", max_tokens))
     return LLMConfig(
         provider=provider,
         model=model,
         base_url=base_url.rstrip("/"),
         api_key_env=api_key_env,
         temperature=float(merged.get("temperature", 0.7)),
-        max_tokens=int(merged.get("max_tokens", 1024)),
+        max_tokens=max_tokens,
+        max_output_tokens=max_output,
+        num_ctx=int(merged.get("num_ctx", DEFAULT_NUM_CTX)),
+        safety_margin=int(merged.get("safety_margin", 64)),
+        repeat_instruction=bool(merged.get("repeat_instruction", True)),
+        tokenizer_id=str(merged.get("tokenizer_id") or "NousResearch/Meta-Llama-3-8B"),
         timeout_s=float(merged.get("timeout_s", 120)),
         max_retries=int(merged.get("max_retries", 3)),
     )
+
+
+def ollama_origin(base_url: str) -> str:
+    origin = base_url.rstrip("/")
+    if origin.endswith("/v1"):
+        origin = origin[: -len("/v1")]
+    return origin
 
 
 class LLMClient:
@@ -109,17 +143,62 @@ class LLMClient:
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> str:
+        temp = self.config.temperature if temperature is None else temperature
+        max_out = self.config.max_output_tokens if max_tokens is None else max_tokens
+
+        if self.config.provider == "local":
+            return self._chat_ollama_native(messages, temperature=temp, max_tokens=max_out)
+
         resp = self._openai().chat.completions.create(
             model=self.config.model,
             messages=messages,  # type: ignore[arg-type]
-            temperature=self.config.temperature if temperature is None else temperature,
-            max_tokens=self.config.max_tokens if max_tokens is None else max_tokens,
+            temperature=temp,
+            max_tokens=max_out,
         )
         choice = resp.choices[0].message
         content = choice.content if choice else None
         if not content:
             raise RuntimeError("LLM returned empty content")
         return content.strip()
+
+    def _chat_ollama_native(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float,
+        max_tokens: int,
+    ) -> str:
+        """Native /api/chat — the only path that reliably applies num_ctx."""
+        origin = ollama_origin(self.config.base_url)
+        payload = {
+            "model": self.config.model,
+            "messages": messages,
+            "stream": False,
+            "options": {
+                "num_ctx": int(self.config.num_ctx),
+                "temperature": float(temperature),
+                "num_predict": int(max_tokens),
+            },
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            f"{origin}/api/chat",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        last_err: Exception | None = None
+        for _ in range(max(1, self.config.max_retries)):
+            try:
+                with urllib.request.urlopen(req, timeout=self.config.timeout_s) as resp:
+                    body = json.loads(resp.read().decode("utf-8"))
+                content = (body.get("message") or {}).get("content")
+                if not content:
+                    raise RuntimeError(f"Ollama returned empty content: {body!r}")
+                return str(content).strip()
+            except (urllib.error.URLError, TimeoutError, RuntimeError, json.JSONDecodeError) as exc:
+                last_err = exc
+        raise RuntimeError(f"Ollama /api/chat failed: {last_err}")
 
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```", re.IGNORECASE)

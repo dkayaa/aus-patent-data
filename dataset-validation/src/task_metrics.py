@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from faithfulness import FaithfulnessScorer
 from ipc_checks import (
     check_ipc_reasoning,
     normalize_ipc,
@@ -19,6 +20,7 @@ from schema import (
     simple_tokenize,
 )
 from semantic import SemanticScorer
+from terms_coverage import TermsCoverageScorer
 
 TASKS = (
     "ipc_reasoning",
@@ -63,6 +65,24 @@ def text_pair(
     return None
 
 
+def claims_for_terms(record: dict[str, Any]) -> str | None:
+    """Claims (or claim-bearing input) for Terms Coverage; None for MRC."""
+    task = str(record.get("task") or "")
+    input_text = str(record.get("input") or "")
+    if task == "abstract_drafting":
+        return input_text
+    if task == "ipc_reasoning":
+        _, claims = parse_ipc_input(input_text)
+        if claims:
+            return claims
+        marker = "Claims:\n"
+        idx = input_text.find(marker)
+        if idx >= 0:
+            return input_text[idx + len(marker) :]
+        return input_text
+    return None
+
+
 def length_features(input_text: str, output_text: str) -> dict[str, float | int]:
     n_in = len(simple_tokenize(input_text))
     n_out = len(simple_tokenize(output_text))
@@ -89,8 +109,13 @@ def score_record(
     semantic: SemanticScorer | None,
     floors: dict[str, float],
     ipc_lookup: Any | None = None,
+    terms: TermsCoverageScorer | None = None,
+    faithfulness: FaithfulnessScorer | None = None,
 ) -> dict[str, Any]:
-    """Compute validation block (scores + failed_rules)."""
+    """Compute validation block (scores + failed_rules).
+
+    Terms Coverage and Faithfulness are additive and never append to failed_rules.
+    """
     task = str(record.get("task") or "")
     failed = structural_failures(record, expected_task=task)
 
@@ -118,8 +143,33 @@ def score_record(
         "best_span_f1": None,
         "answer_contained": None,
         "semantic_cosine": None,
+        "semantic_cosine_max": None,
+        "semantic_cosine_mean": None,
+        "n_chunks": None,
+        "embedding_model": None,
+        "embedding_model_id": None,
         "claims_rouge_l_f1": None,
         "claims_semantic_cosine": None,
+        "terms_coverage": None,
+        "terms_n_input": None,
+        "terms_n_matched": None,
+        "terms_n_unmatched": None,
+        "terms_unmatched": None,
+        "faithfulness_rate": None,
+        "undecided_rate": None,
+        "faithfulness_support_low": None,
+        "faithfulness_support_high": None,
+        "n_sentences": None,
+        "n_scored": None,
+        "n_meta": None,
+        "n_supported": None,
+        "n_undecided": None,
+        "n_unsupported": None,
+        "min_prob_combined": None,
+        "meta_sentences": None,
+        "unsupported_sentences": None,
+        "undecided_sentences": None,
+        "faithfulness_model": None,
     }
 
     if pair is not None:
@@ -131,16 +181,42 @@ def score_record(
         else:
             metrics["rouge_l_f1"] = rouge_l_f1(side_a, side_b)
             if semantic is not None:
-                metrics["semantic_cosine"] = semantic.cosine_pair(side_a, side_b)
+                sem = semantic.score_pair(side_a, side_b)
+                metrics["semantic_cosine"] = sem["semantic_cosine"]
+                metrics["semantic_cosine_max"] = sem["semantic_cosine_max"]
+                metrics["semantic_cosine_mean"] = sem["semantic_cosine_mean"]
+                metrics["n_chunks"] = sem["n_chunks"]
+                metrics["embedding_model"] = sem["embedding_model"]
+                metrics["embedding_model_id"] = sem["embedding_model_id"]
 
     if task == "ipc_reasoning" and scored_out:
         _, claims = parse_ipc_input(input_text)
         if claims:
             metrics["claims_rouge_l_f1"] = rouge_l_f1(claims, scored_out)
             if semantic is not None:
-                metrics["claims_semantic_cosine"] = semantic.cosine_pair(
-                    claims, scored_out
-                )
+                sem_c = semantic.score_pair(claims, scored_out)
+                metrics["claims_semantic_cosine"] = sem_c["semantic_cosine"]
+
+    if terms is not None and task in ("abstract_drafting", "ipc_reasoning"):
+        claims = claims_for_terms(record)
+        if claims is not None:
+            metrics.update(terms.score(claims, scored_out or output_text))
+
+    faithfulness_sentences: dict[str, Any] | None = None
+    if faithfulness is not None and task == "ipc_reasoning" and scored_out:
+        claims = claims_for_terms(record) or ""
+        entry = ipc_lookup.get(_primary_ipc(record)) if ipc_lookup is not None else None
+        definition = str(getattr(entry, "definition_statement", "") or "").strip()
+        if definition:
+            app = str(record.get("application_number") or "")
+            fr = faithfulness.score_justification(
+                application_number=app,
+                justification=scored_out,
+                claims=claims,
+                definition=definition,
+            )
+            metrics.update(faithfulness.summary_dict(fr))
+            faithfulness_sentences = faithfulness.sentence_detail_dict(fr)
 
     cos_min = float(floors.get("semantic_cosine_min", 0.15))
     rouge_min = float(floors.get("rouge_l_f1_min", 0.02))
@@ -179,8 +255,11 @@ def score_record(
         if rl is not None and rl < rouge_min:
             failed.append("rouge_l_below_floor")
 
-    return {
+    out: dict[str, Any] = {
         "passed": len(failed) == 0,
         "failed_rules": failed,
         "scores": metrics,
     }
+    if faithfulness_sentences is not None:
+        out["faithfulness_sentences"] = faithfulness_sentences
+    return out

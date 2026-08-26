@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import json
+import logging
 import sys
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -30,9 +33,28 @@ from holdings import (  # noqa: E402
     write_manifest,
 )
 from ipc_lookup import IPCLookup  # noqa: E402
-from llm import LLMClient, llm_config_from_dict  # noqa: E402
+from llm import LLMClient, llm_config_from_dict, ollama_origin  # noqa: E402
 from patents import iter_patent_texts  # noqa: E402
+from prompt_fit import (  # noqa: E402
+    OversizedPromptError,
+    assert_ollama_num_ctx,
+    get_tokenizer,
+    prompt_budget_from_config,
+)
 from tasks import TASKS  # noqa: E402
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
+
+# Empirically determined by scripts/probe_ollama_truncation.py (2026-08-20):
+# Ollama drops the BEGINNING of prompts that exceed num_ctx.
+OLLAMA_TRUNCATION_DROPS = "start"
+OLLAMA_TRUNCATION_NOTE = (
+    "When a prompt exceeds num_ctx, Ollama drops the BEGINNING "
+    "(keeps the most recent / end tokens). Over-long prompts therefore "
+    "lose the system prompt and instruction first. prompt_fit trims claims "
+    "so we never send an over-limit prompt."
+)
 
 DEFAULT_CONFIG = (
     REPO_ROOT / "instruction-generation" / "config" / "instruction_generation.yaml"
@@ -133,6 +155,18 @@ def build_parser() -> argparse.ArgumentParser:
             "(requires a single --task; overwrites _pools/<task>.json)."
         ),
     )
+    p.add_argument(
+        "--only-ids",
+        type=Path,
+        default=None,
+        help="JSON/JSONL/txt list of application_numbers to regenerate only",
+    )
+    p.add_argument(
+        "--repeat-instruction",
+        type=lambda s: str(s).lower() in ("1", "true", "yes", "on"),
+        default=None,
+        help="Override llm.repeat_instruction (true/false)",
+    )
     return p
 
 
@@ -151,13 +185,42 @@ def _write_ok(
     patent: Any,
     record: dict[str, Any],
     n_ok: int,
+    append_done: bool,
 ) -> int:
     writer.add(record)
-    append_done_id(task_dir, patent.application_number)
+    if append_done:
+        append_done_id(task_dir, patent.application_number)
     n_ok += 1
     if n_ok % 10 == 0:
         print(f"[{task_id}] wrote {n_ok}…", flush=True)
     return n_ok
+
+
+def _load_only_ids(path: Path) -> set[str]:
+    text = path.read_text(encoding="utf-8").strip()
+    ids: set[str] = set()
+    if path.suffix == ".json":
+        data = json.loads(text)
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, str):
+                    ids.add(item.strip())
+                elif isinstance(item, dict) and item.get("application_number"):
+                    ids.add(str(item["application_number"]).strip())
+        elif isinstance(data, dict):
+            for item in data.get("ids") or data.get("application_numbers") or []:
+                ids.add(str(item).strip())
+        return {x for x in ids if x}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("{"):
+            row = json.loads(line)
+            ids.add(str(row.get("application_number") or "").strip())
+        else:
+            ids.add(line)
+    return {x for x in ids if x}
 
 
 def run_task(
@@ -171,6 +234,8 @@ def run_task(
     pools: Path,
     limit: int | None,
     workers: int,
+    only_ids: set[str] | None,
+    prompt_budget: Any,
 ) -> dict[str, Any]:
     evol_cfg = cfg.get("evol_instruct") or {}
     run_cfg = cfg.get("run") or {}
@@ -183,25 +248,35 @@ def run_task(
         ipc_lookup=ipc_lookup,
         evol_cfg=evol_cfg,
         pools_dir=pools,
+        prompt_budget=prompt_budget,
     )
     print(f"[{task_id}] setup…", flush=True)
     task.setup()
 
     task_dir = task_output_dir(dest, task_id)
-    done = load_done_ids(task_dir)
+    # When regenerating a specific id list, do not skip via done_ids — we are
+    # explicitly rewriting those records.
+    done = set() if only_ids else load_done_ids(task_dir)
     writer = ShardWriter(task_dir, shard_size=shard_size)
     patents = iter_patent_texts(patents_dir, limit=None, skip_ids=done)
+    if only_ids is not None:
+        patents = (
+            patent
+            for patent in patents
+            if patent.application_number in only_ids
+        )
 
     if workers == 1:
-        n_ok, n_skip, n_err = _run_serial(
+        n_ok, n_skip, n_err, n_oversized, n_trimmed = _run_serial(
             task_id, task=task, patents=patents, task_dir=task_dir,
-            writer=writer, limit=limit,
+            writer=writer, limit=limit, append_done=only_ids is None,
         )
     else:
         print(f"[{task_id}] workers={workers}", flush=True)
-        n_ok, n_skip, n_err = _run_parallel(
+        n_ok, n_skip, n_err, n_oversized, n_trimmed = _run_parallel(
             task_id, task=task, patents=patents, task_dir=task_dir,
             writer=writer, limit=limit, workers=workers,
+            append_done=only_ids is None,
         )
 
     flushed = writer.flush()
@@ -211,11 +286,14 @@ def run_task(
         "skipped": n_skip,
         "errors": n_err,
         "workers": workers,
+        "oversized_skipped": n_oversized,
+        "claims_trimmed": n_trimmed,
         "shards": [str(p) for p in writer.written_paths],
         "last_flush": str(flushed) if flushed else None,
     }
     print(
-        f"[{task_id}] done: written={n_ok} skipped={n_skip} errors={n_err}",
+        f"[{task_id}] done: written={n_ok} skipped={n_skip} errors={n_err} "
+        f"trimmed={n_trimmed} oversized={n_oversized}",
         flush=True,
     )
     return stats
@@ -229,10 +307,13 @@ def _run_serial(
     task_dir: Path,
     writer: ShardWriter,
     limit: int | None,
-) -> tuple[int, int, int]:
+    append_done: bool,
+) -> tuple[int, int, int, int, int]:
     n_ok = 0
     n_skip = 0
     n_err = 0
+    n_oversized = 0
+    n_trimmed = 0
     for patent in patents:
         if limit is not None and n_ok >= limit:
             break
@@ -241,6 +322,11 @@ def _run_serial(
             continue
         patent, record, err = _try_generate(task, patent)
         if err is not None:
+            if isinstance(err, OversizedPromptError):
+                n_oversized += 1
+                n_skip += 1
+                logger.error("%s", err)
+                continue
             n_err += 1
             print(
                 f"[{task_id}] error {patent.application_number}: {err}",
@@ -251,6 +337,8 @@ def _run_serial(
         if record is None:
             n_skip += 1
             continue
+        if (record.get("meta") or {}).get("claims_trimmed"):
+            n_trimmed += 1
         n_ok = _write_ok(
             task_id=task_id,
             task_dir=task_dir,
@@ -258,8 +346,9 @@ def _run_serial(
             patent=patent,
             record=record,
             n_ok=n_ok,
+            append_done=append_done,
         )
-    return n_ok, n_skip, n_err
+    return n_ok, n_skip, n_err, n_oversized, n_trimmed
 
 
 def _run_parallel(
@@ -271,10 +360,13 @@ def _run_parallel(
     writer: ShardWriter,
     limit: int | None,
     workers: int,
-) -> tuple[int, int, int]:
+    append_done: bool,
+) -> tuple[int, int, int, int, int]:
     n_ok = 0
     n_skip = 0
     n_err = 0
+    n_oversized = 0
+    n_trimmed = 0
     exhausted = False
     inflight: dict[Future[tuple[Any, dict[str, Any] | None, BaseException | None]], Any] = {}
     # Keep the pool fed. IPC skips locally; eligible() already dropped those.
@@ -326,6 +418,11 @@ def _run_parallel(
                     )
                     continue
                 if err is not None:
+                    if isinstance(err, OversizedPromptError):
+                        n_oversized += 1
+                        n_skip += 1
+                        logger.error("%s", err)
+                        continue
                     n_err += 1
                     print(
                         f"[{task_id}] error {patent.application_number}: {err}",
@@ -338,6 +435,8 @@ def _run_parallel(
                     continue
                 if limit is not None and n_ok >= limit:
                     continue
+                if (record.get("meta") or {}).get("claims_trimmed"):
+                    n_trimmed += 1
                 n_ok = _write_ok(
                     task_id=task_id,
                     task_dir=task_dir,
@@ -345,8 +444,9 @@ def _run_parallel(
                     patent=patent,
                     record=record,
                     n_ok=n_ok,
+                    append_done=append_done,
                 )
-    return n_ok, n_skip, n_err
+    return n_ok, n_skip, n_err, n_oversized, n_trimmed
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -394,8 +494,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: IPC JSONL missing: {ipc_jsonl}", file=sys.stderr)
         return 1
 
+    llm_raw = dict(cfg.get("llm") or {})
+    if args.repeat_instruction is not None:
+        llm_raw["repeat_instruction"] = bool(args.repeat_instruction)
+
     llm_cfg = llm_config_from_dict(
-        cfg.get("llm") or {},
+        llm_raw,
         overrides={
             "provider": args.provider,
             "model": args.model,
@@ -421,6 +525,16 @@ def main(argv: list[str] | None = None) -> int:
         },
     )
     client = LLMClient(llm_cfg)
+    budget = prompt_budget_from_config(
+        {
+            "num_ctx": llm_cfg.num_ctx,
+            "max_output_tokens": llm_cfg.max_output_tokens,
+            "safety_margin": llm_cfg.safety_margin,
+            "repeat_instruction": llm_cfg.repeat_instruction,
+            "tokenizer_id": llm_cfg.tokenizer_id,
+        }
+    )
+
     print(
         f"LLM provider={llm_cfg.provider} model={llm_cfg.model} "
         f"temperature={llm_cfg.temperature} base_url={llm_cfg.base_url}",
@@ -428,10 +542,47 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"Generator dir: {dest}", flush=True)
     print(f"Shared pools: {shared_pools}", flush=True)
+    print(
+        f"Budget num_ctx={budget.num_ctx} max_output_tokens={budget.max_output_tokens} "
+        f"safety_margin={budget.safety_margin} input_budget={budget.input_budget} "
+        f"repeat_instruction={budget.repeat_instruction} "
+        f"tokenizer_id={budget.tokenizer_id}",
+        flush=True,
+    )
+
+    # Preload tokenizer once (documented HF stand-in for llama3.1:8b).
+    get_tokenizer(budget.tokenizer_id)
+
+    asserted_num_ctx: int | None = None
+    if llm_cfg.provider == "local":
+        def _warmup() -> None:
+            client.chat(
+                [{"role": "user", "content": "ping"}],
+                max_tokens=1,
+                temperature=0,
+            )
+
+        asserted_num_ctx = assert_ollama_num_ctx(
+            model=llm_cfg.model,
+            base_url=llm_cfg.base_url,
+            expected_num_ctx=llm_cfg.num_ctx,
+            chat_fn=_warmup,
+        )
+        print(
+            f"Asserted Ollama effective num_ctx={asserted_num_ctx} "
+            f"(origin={ollama_origin(llm_cfg.base_url)})",
+            flush=True,
+        )
 
     print(f"Loading IPC catalog: {ipc_jsonl}", flush=True)
     ipc_lookup = IPCLookup.from_jsonl(ipc_jsonl)
     print(f"IPC entries: {len(ipc_lookup)}", flush=True)
+
+    only_ids = None
+    if args.only_ids is not None:
+        only_path = _resolve(args.only_ids)
+        only_ids = _load_only_ids(only_path)
+        print(f"Regenerating only {len(only_ids)} ids from {only_path}", flush=True)
 
     run_cfg = cfg.get("run") or {}
     limit = args.limit if args.limit is not None else run_cfg.get("limit")
@@ -457,8 +608,36 @@ def main(argv: list[str] | None = None) -> int:
             pools=shared_pools,
             limit=limit,
             workers=workers,
+            only_ids=only_ids,
+            prompt_budget=budget,
         )
         all_stats.append(stats)
+
+        task_dir = task_output_dir(dest, task_id)
+        task_dir.mkdir(parents=True, exist_ok=True)
+        run_meta = {
+            "task": task_id,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "provider": llm_cfg.provider,
+            "model": llm_cfg.model,
+            "base_url": llm_cfg.base_url,
+            "num_ctx": llm_cfg.num_ctx,
+            "asserted_num_ctx": asserted_num_ctx,
+            "max_output_tokens": llm_cfg.max_output_tokens,
+            "safety_margin": llm_cfg.safety_margin,
+            "input_budget": budget.input_budget,
+            "repeat_instruction": budget.repeat_instruction,
+            "tokenizer_id": budget.tokenizer_id,
+            "temperature": llm_cfg.temperature,
+            "ollama_truncation_drops": OLLAMA_TRUNCATION_DROPS,
+            "ollama_truncation_notes": OLLAMA_TRUNCATION_NOTE,
+            "stats": stats,
+        }
+        meta_path = task_dir / "run_meta.json"
+        with meta_path.open("w", encoding="utf-8") as f:
+            json.dump(run_meta, f, indent=2)
+            f.write("\n")
+        print(f"[{task_id}] run metadata → {meta_path}", flush=True)
 
     print(f"Finished {len(all_stats)} task(s) → {dest}", flush=True)
     return 0

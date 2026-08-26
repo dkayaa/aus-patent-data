@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import statistics
 import sys
@@ -19,8 +20,9 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from io_util import ShardWriter, iter_task_records  # noqa: E402
-from semantic import SemanticScorer  # noqa: E402
+from semantic import SemanticScorer, load_embedding_registry  # noqa: E402
 from task_metrics import TASKS, score_record  # noqa: E402
+from terms_coverage import TermsCoverageScorer  # noqa: E402
 
 IG_SRC = REPO_ROOT / "instruction-generation" / "src"
 if str(IG_SRC) not in sys.path:
@@ -30,6 +32,7 @@ from holdings import resolve_generator_dir  # noqa: E402
 from ipc_lookup import IPCLookup  # noqa: E402
 
 DEFAULT_CONFIG = REPO_ROOT / "dataset-validation" / "config" / "programmatic.yaml"
+DEFAULT_REGISTRY = REPO_ROOT / "dataset-validation" / "config" / "embedding_models.yaml"
 
 
 def _resolve(path: Path) -> Path:
@@ -48,7 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description=(
             "Programmatic validation of instruction JSONL: schema/IPC + "
-            "ROUGE-L / token-F1 + Nomic Embed cosine."
+            "ROUGE-L / best-span-F1 + configurable embedding cosine + Terms Coverage."
         )
     )
     p.add_argument(
@@ -82,9 +85,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override task output dir (implies single --task)",
     )
     p.add_argument(
+        "--embedding-model",
+        default=None,
+        help="Override semantic.embedding_model key (minilm|granite|granite_small|nomic)",
+    )
+    p.add_argument(
         "--skip-semantic",
         action="store_true",
         help="Skip embedding cosine (lexical + structural only)",
+    )
+    p.add_argument(
+        "--faithfulness",
+        action="store_true",
+        help=(
+            "Run MiniCheck faithfulness on ipc_reasoning (additive, non-gating). "
+            "Slow; prefer scripts/run_faithfulness_ipc.py for the report."
+        ),
     )
     return p
 
@@ -100,6 +116,8 @@ def validate_task(
     output_dir: Path,
     floors: dict[str, float],
     semantic: SemanticScorer | None,
+    terms: TermsCoverageScorer | None,
+    faithfulness: Any | None,
     ipc_lookup: Any | None,
     shard_size: int,
     limit: int | None,
@@ -109,6 +127,8 @@ def validate_task(
 
     passed_writer = ShardWriter(output_dir / "passed", shard_size=shard_size)
     rejected_writer = ShardWriter(output_dir / "rejected", shard_size=shard_size)
+    faith_sent_path = output_dir / "faithfulness" / "sentences.jsonl.gz"
+    faith_sent_rows: list[dict[str, Any]] = []
 
     fail_counts: Counter[str] = Counter()
     rouge_vals: list[float] = []
@@ -116,6 +136,9 @@ def validate_task(
     best_span_vals: list[float] = []
     claims_cos_vals: list[float] = []
     claims_rouge_vals: list[float] = []
+    terms_vals: list[float] = []
+    faith_vals: list[float] = []
+    n_chunked = 0
     n_total = 0
     n_pass = 0
     n_reject = 0
@@ -123,15 +146,35 @@ def validate_task(
     for record in iter_task_records(input_dir):
         if limit is not None and n_total >= limit:
             break
-        # Ensure task field matches folder when missing/wrong for metrics routing
         if not record.get("task"):
             record = {**record, "task": task_id}
         n_total += 1
 
         validation = score_record(
-            record, semantic=semantic, floors=floors, ipc_lookup=ipc_lookup
+            record,
+            semantic=semantic,
+            floors=floors,
+            ipc_lookup=ipc_lookup,
+            terms=terms,
+            faithfulness=faithfulness if task_id == "ipc_reasoning" else None,
         )
+        sent_detail = validation.pop("faithfulness_sentences", None)
+        if sent_detail is not None:
+            faith_sent_rows.append(sent_detail)
+
         meta = dict(record.get("meta") or {})
+        # Keep any prior validation block under a distinct key so re-runs with a
+        # new embedding model do not silently erase the old cosine numbers.
+        if "validation" in meta and isinstance(meta["validation"], dict):
+            prev = meta["validation"]
+            prev_scores = (prev.get("scores") or {}) if isinstance(prev, dict) else {}
+            prev_model = prev_scores.get("embedding_model") or prev_scores.get(
+                "embedding_model_id"
+            )
+            cur_model = (validation.get("scores") or {}).get("embedding_model")
+            if prev_model and cur_model and prev_model != cur_model:
+                archive_key = f"validation_prior_{prev_model}"
+                meta.setdefault(archive_key, prev)
         meta["validation"] = validation
         out_rec = {**record, "meta": meta}
 
@@ -146,6 +189,12 @@ def validate_task(
             claims_cos_vals.append(float(scores["claims_semantic_cosine"]))
         if scores.get("claims_rouge_l_f1") is not None:
             claims_rouge_vals.append(float(scores["claims_rouge_l_f1"]))
+        if scores.get("terms_coverage") is not None:
+            terms_vals.append(float(scores["terms_coverage"]))
+        if scores.get("faithfulness_rate") is not None:
+            faith_vals.append(float(scores["faithfulness_rate"]))
+        if scores.get("n_chunks") is not None and int(scores["n_chunks"]) > 1:
+            n_chunked += 1
 
         if validation["passed"]:
             passed_writer.add(out_rec)
@@ -162,6 +211,12 @@ def validate_task(
     passed_writer.flush()
     rejected_writer.flush()
 
+    if faith_sent_rows:
+        faith_sent_path.parent.mkdir(parents=True, exist_ok=True)
+        with gzip.open(faith_sent_path, "wt", encoding="utf-8") as f:
+            for row in faith_sent_rows:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
     report = {
         "task": task_id,
         "n_total": n_total,
@@ -173,9 +228,17 @@ def validate_task(
         "mean_best_span_f1": _mean(best_span_vals),
         "mean_claims_semantic_cosine": _mean(claims_cos_vals),
         "mean_claims_rouge_l_f1": _mean(claims_rouge_vals),
+        "mean_terms_coverage": _mean(terms_vals),
+        "mean_faithfulness_rate": _mean(faith_vals),
+        "n_chunked": n_chunked,
+        "embedding_model": semantic.model_key if semantic else None,
+        "embedding_model_id": semantic.model_name if semantic else None,
+        "max_seq_length": semantic.max_seq_length if semantic else None,
         "passed_shards": [str(p) for p in passed_writer.paths],
         "rejected_shards": [str(p) for p in rejected_writer.paths],
     }
+    if faith_sent_rows:
+        report["faithfulness_sentences_path"] = str(faith_sent_path)
     output_dir.mkdir(parents=True, exist_ok=True)
     report_path = output_dir / "report.json"
     with report_path.open("w", encoding="utf-8") as f:
@@ -233,17 +296,51 @@ def main(argv: list[str] | None = None) -> int:
     load_semantic = (not args.skip_semantic) and any(tid != "mrc" for tid in task_ids)
     if load_semantic:
         sem_cfg = cfg.get("semantic") or {}
+        model_key = str(
+            args.embedding_model or sem_cfg.get("embedding_model") or "nomic"
+        )
+        registry = load_embedding_registry(DEFAULT_REGISTRY)
+        if model_key not in registry:
+            print(
+                f"error: unknown embedding_model {model_key!r}; "
+                f"choose from {sorted(registry)}",
+                file=sys.stderr,
+            )
+            return 1
+        spec = registry[model_key]
         print(
-            f"Loading semantic model: {sem_cfg.get('model_name', 'nomic-ai/nomic-embed-text-v1.5')}",
+            f"Loading semantic model key={model_key} name={spec.model_name}",
             flush=True,
         )
         semantic = SemanticScorer(
-            str(sem_cfg.get("model_name") or "nomic-ai/nomic-embed-text-v1.5"),
-            max_seq_length=int(sem_cfg.get("max_seq_length") or 8192),
+            spec,
             batch_size=int(sem_cfg.get("batch_size") or 8),
-            prefix_a=str(sem_cfg.get("prefix_a") or "search_document: "),
-            prefix_b=str(sem_cfg.get("prefix_b") or "search_document: "),
-            trust_remote_code=bool(sem_cfg.get("trust_remote_code", True)),
+            chunk_overlap_frac=float(sem_cfg.get("chunk_overlap_frac") or 0.25),
+        )
+
+    terms: TermsCoverageScorer | None = None
+    tc_cfg = cfg.get("terms_coverage") or {}
+    if bool(tc_cfg.get("enabled", True)):
+        bp = _resolve(
+            Path(
+                tc_cfg.get("boilerplate_config")
+                or "dataset-validation/config/terms_boilerplate.yaml"
+            )
+        )
+        terms = TermsCoverageScorer(bp)
+
+    faithfulness = None
+    faith_cfg = cfg.get("faithfulness") or {}
+    if args.faithfulness or bool(faith_cfg.get("enabled")):
+        from faithfulness import FaithfulnessScorer
+
+        faithfulness = FaithfulnessScorer(
+            cache_dir=_resolve(Path(faith_cfg.get("cache_dir") or "ckpts")),
+            batch_size=int(faith_cfg.get("batch_size") or 8),
+            support_high=float(faith_cfg.get("support_high") or 0.7),
+            support_low=float(faith_cfg.get("support_low") or 0.3),
+            score_halves=bool(faith_cfg.get("score_halves") or False),
+            terms=terms,
         )
 
     ipc_lookup: Any | None = None
@@ -290,6 +387,8 @@ def main(argv: list[str] | None = None) -> int:
                 output_dir=out_dir,
                 floors=floors,
                 semantic=semantic,
+                terms=terms,
+                faithfulness=faithfulness,
                 ipc_lookup=ipc_lookup,
                 shard_size=shard_size,
                 limit=limit,

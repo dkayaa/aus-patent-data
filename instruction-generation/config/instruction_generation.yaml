@@ -8,8 +8,8 @@ paths:
   output_dir: data/derived/instruction_generation
 
 llm:
-  # local = OpenAI-compatible server (Ollama / llama.cpp / vLLM /v1)
-  # openrouter = https://openrouter.ai/api/v1  (CLI: --provider openrouter)
+  # local = Ollama native /api/chat (not the OpenAI /v1 shim — that path did not
+  # honour num_ctx=8192; native does). openrouter = OpenRouter OpenAI API.
   provider: local
   model: llama3.1:8b
   base_url: http://127.0.0.1:11434/v1
@@ -17,7 +17,18 @@ llm:
   # OpenRouter uses OPENROUTER_API_KEY when provider is switched.
   api_key_env: OPENAI_API_KEY
   temperature: 0.7
+  # Generation length; also used as max_output_tokens for the input budget.
   max_tokens: 1024
+  max_output_tokens: 1024
+  # Explicit Ollama context window. Input budget = num_ctx - max_output_tokens - safety_margin.
+  num_ctx: 8192
+  safety_margin: 64
+  # HuggingFace tokenizer for exact prompt token counts (Llama-3 BPE; Meta's
+  # gated Meta-Llama-3.1-8B tokenizer is equivalent). Ollama has no tokenize API.
+  tokenizer_id: NousResearch/Meta-Llama-3-8B
+  # Belt-and-braces: repeat the instruction after the claims so a front-truncating
+  # backend still leaves a copy of the instruction at the end.
+  repeat_instruction: true
   timeout_s: 120
   max_retries: 3
 

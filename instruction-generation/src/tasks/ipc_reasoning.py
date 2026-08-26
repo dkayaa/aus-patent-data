@@ -6,6 +6,12 @@ from pathlib import Path
 from typing import Any
 
 from patents import PatentText
+from prompt_fit import (
+    OversizedPromptError,
+    append_oversized_record,
+    fit_teacher_prompt,
+    prompt_budget_from_config,
+)
 
 from .base import Task
 from .evol_pool import load_or_build_pool, sample_instruction
@@ -13,23 +19,21 @@ from .evol_pool import load_or_build_pool, sample_instruction
 SYSTEM_PROMPT = "You are an expert Australian Patent Examiner."
 
 # Teacher prompt: used only to synthesize the justification (not the SFT instruction).
-JUSTIFICATION_USER_TEMPLATE = """The assigned IPC code is GOLD. Do not propose a different code.
+# Claims are injected separately by prompt_fit so they can be trimmed to num_ctx.
+JUSTIFICATION_INSTRUCTION = """The assigned IPC code is GOLD. Do not propose a different code.
 
 Here is the official WIPO catalog text for that code, plus the patent abstract and claims.
 
 {ipc_block}
 
 Abstract:
-{abstract}
+{abstract}"""
 
-Claims:
-{claims}
+JUSTIFICATION_TRAILER = """Write a short technical justification (about 120–220 words) that maps this invention’s claimed subject matter onto the WIPO definition.
 
-Write a short technical justification (about 120–220 words) that maps this invention’s claimed subject matter onto the WIPO definition.
+Ground the mapping in concrete claim features (parts, steps, materials), not the IPC title. Quote or tightly paraphrase the catalog text; do not invent definitional scope. Use only the provided definition and do not mention other IPC codes.
 
-- Ground the mapping in concrete claim features (parts, steps, materials), not the IPC title. Quote or tightly paraphrase the catalog text; do not invent definitional scope.
-- Use only the provided definition. Do not mention other IPC codes.
-- Prose only: no Classification line, no headings, no bullet list. Do not follow a fixed outline. Opening, sentence count, and order may vary from example to example."""
+Respond with the justification only, as free prose: no Classification line, headings, or bullet list. Do not follow a fixed outline. Opening, sentence count, and order may vary from example to example."""
 
 # Instruction diversification (same pattern as abstract drafting pools).
 # Pool wordings must match the teacher target: one paragraph, claim→definition
@@ -88,29 +92,54 @@ class IPCReasoningTask(Task):
 
         if not self._pool:
             self.setup()
-        instruction = sample_instruction(self._pool)
+        sft_instruction = sample_instruction(self._pool)
 
-        user = JUSTIFICATION_USER_TEMPLATE.format(
+        budget = self.prompt_budget or prompt_budget_from_config(
+            {
+                "num_ctx": self.client.config.num_ctx,
+                "max_output_tokens": self.client.config.max_output_tokens,
+                "safety_margin": self.client.config.safety_margin,
+                "repeat_instruction": self.client.config.repeat_instruction,
+                "tokenizer_id": self.client.config.tokenizer_id,
+            }
+        )
+        teacher_instruction = JUSTIFICATION_INSTRUCTION.format(
             ipc_block=entry.grounding_text(),
             abstract=patent.abstract,
-            claims=patent.claims_text,
         )
-        justification = self.client.chat(
-            [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user},
-            ]
-        )
+        try:
+            fitted = fit_teacher_prompt(
+                system=SYSTEM_PROMPT,
+                instruction=teacher_instruction,
+                claims=patent.claims,
+                trailer=JUSTIFICATION_TRAILER,
+                budget=budget,
+                application_number=patent.application_number,
+                task=self.task_id,
+            )
+        except OversizedPromptError as exc:
+            append_oversized_record(
+                application_number=exc.application_number,
+                task=exc.task,
+                prompt_tokens=exc.prompt_tokens,
+                input_budget=exc.input_budget,
+                n_claims_original=exc.n_claims_original,
+            )
+            return None
+
+        justification = self.client.chat(fitted.messages)
         output = (
             f"Classification: {patent.primary_ipc}\n"
             f"Justification: {justification.strip()}"
         )
+        # SFT input keeps the full (untrimmed) patent text; trim metadata is in meta.
         input_text = f"Abstract:\n{patent.abstract}\n\nClaims:\n{patent.claims_text}"
         return self._record(
             patent,
-            instruction=instruction,
+            instruction=sft_instruction,
             input_text=input_text,
             output_text=output,
             ipc_title=entry.title,
             has_definition_entry=entry.has_definition_entry,
+            **self._fit_meta(fitted),
         )

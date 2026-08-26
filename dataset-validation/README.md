@@ -4,7 +4,7 @@ Validation of seed instruction JSONL after `instruction-generation/`.
 
 | Mode | What | Entry |
 |------|------|--------|
-| **1** Programmatic | Schema/IPC (WIPO catalog), ROUGE-L, MRC best-span F1, Nomic cosine (IPC vs WIPO + claims; abstract vs claims pairing) | `scripts/validate_instruction_data.py` |
+| **1** Programmatic | Schema/IPC (WIPO catalog), ROUGE-L, MRC best-span F1, configurable embedding cosine (Nomic by default), Terms Coverage | `scripts/validate_instruction_data.py` |
 | **2** LLM-as-a-judge | Sample Mode 1 `passed/` rows; pointwise 1–5; `pass` from `score >= 4`; closed tags | `scripts/judge_instruction_data.py` |
 
 Methodology: [`methodologies/02-dataset-validation/`](../methodologies/02-dataset-validation/).
@@ -19,11 +19,55 @@ Methodology: [`methodologies/02-dataset-validation/`](../methodologies/02-datase
 .venv/bin/python scripts/validate_instruction_data.py --all \
   --generator anthropic/claude-sonnet-4.6
 
+# choose embedding model (keys in config/embedding_models.yaml)
+.venv/bin/python scripts/validate_instruction_data.py --task mrc --embedding-model nomic
+
 # lexical/structural only (no embedding download)
 .venv/bin/python scripts/validate_instruction_data.py --task mrc --skip-semantic
 ```
 
 Reads `data/derived/instruction_generation/{model_slug}/<task>/`. If several generators exist, pass `--generator` (model id or slug). With one generator, that one is used.
+
+The default embedding model is **`nomic`** (`nomic-ai/nomic-embed-text-v1.5`,
+8192-token window). The registry in
+[`config/embedding_models.yaml`](config/embedding_models.yaml) also provides
+`granite`, `granite_small`, and the truncated `minilm` baseline. It records each
+model's expected runtime context length, trust setting, and required document
+prefix; a context-length mismatch fails validation rather than silently
+truncating.
+
+Compare all four models without touching validation outputs:
+
+```bash
+.venv/bin/python scripts/compare_embedding_models.py
+```
+
+Faithfulness (ipc_reasoning only, MiniCheck-Flan-T5-Large, **non-gating**):
+
+```bash
+.venv/bin/pip install "minicheck @ git+https://github.com/Liyan06/MiniCheck.git@main"
+# calibrate first (human good/bad pool) before trusting faithfulness_rate
+.venv/bin/python scripts/calibrate_faithfulness_ipc.py
+# report → reports/faithfulness_calibration.md
+.venv/bin/python scripts/run_faithfulness_ipc.py
+# report → reports/faithfulness_ipc.md
+```
+
+Design (post-calibration): **atomicise** → drop **META** (alignment markers /
+zero claim terms) *before* MiniCheck → score **combined** doc → three-way
+band (`SUPPORTED` P≥0.7, `UNDECIDED` mid, `UNSUPPORTED` P<0.3). Wrong-bridge
+is out of scope — expert audit (undecided band is the natural review set).
+
+Calibration pool: [`config/faithfulness_calibration.jsonl`](config/faithfulness_calibration.jsonl)
+(16 labeled sentences; `difficulty=hard|easy`).
+
+Terms Coverage is an additive, non-gating metric for `abstract_drafting` and
+`ipc_reasoning`. It measures how many technical claim terms are retained in the
+generated text, using the full claims without an embedding window. Configure it
+under `terms_coverage` in
+[`config/programmatic.yaml`](config/programmatic.yaml); deterministic
+boilerplate exclusions live in
+[`config/terms_boilerplate.yaml`](config/terms_boilerplate.yaml).
 
 Outputs under `data/derived/instruction_generation_validation/{model_slug}/<task>/`:
 

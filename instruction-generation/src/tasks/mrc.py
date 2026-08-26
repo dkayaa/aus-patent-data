@@ -7,17 +7,25 @@ from typing import Any
 
 from llm import chat_json
 from patents import PatentText
+from prompt_fit import (
+    OversizedPromptError,
+    append_oversized_record,
+    fit_teacher_prompt,
+    prompt_budget_from_config,
+)
 
 from .base import Task
 from .evol_pool import load_or_build_pool, sample_instruction
 
 SYSTEM_PROMPT = "You are a patent attorney analyzing claims for infringement."
 
-# Teacher prompt: synthesize question + answer only (not the SFT instruction).
-QA_USER_TEMPLATE = """Read the following claims. Generate one highly specific, technical question regarding a numerical limit, chemical composition, or structural dependency found *explicitly* in the text. Then, provide the exact, concise answer. Format your response as a JSON object with 'question' and 'answer' keys.
-
-Claims:
-{claims}"""
+# Teacher instruction (everything except Claims). Claims injected by prompt_fit.
+QA_INSTRUCTION = (
+    "Read the following claims. Generate one highly specific, technical question "
+    "regarding a numerical limit, chemical composition, or structural dependency "
+    "found *explicitly* in the text. Then, provide the exact, concise answer. "
+    "Format your response as a JSON object with 'question' and 'answer' keys."
+)
 
 # Instruction diversification (same pattern as abstract drafting / IPC reasoning pools).
 INSTRUCTION_POOL_PROMPT = (
@@ -56,19 +64,38 @@ class MRCTask(Task):
     def generate(self, patent: PatentText) -> dict[str, Any] | None:
         if not self._pool:
             self.setup()
-        instruction = sample_instruction(self._pool)
+        sft_instruction = sample_instruction(self._pool)
 
-        payload = chat_json(
-            self.client,
-            [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {
-                    "role": "user",
-                    "content": QA_USER_TEMPLATE.format(claims=patent.claims_text),
-                },
-            ],
-            expect=dict,
+        budget = self.prompt_budget or prompt_budget_from_config(
+            {
+                "num_ctx": self.client.config.num_ctx,
+                "max_output_tokens": self.client.config.max_output_tokens,
+                "safety_margin": self.client.config.safety_margin,
+                "repeat_instruction": self.client.config.repeat_instruction,
+                "tokenizer_id": self.client.config.tokenizer_id,
+            }
         )
+        try:
+            fitted = fit_teacher_prompt(
+                system=SYSTEM_PROMPT,
+                instruction=QA_INSTRUCTION,
+                claims=patent.claims,
+                trailer="",
+                budget=budget,
+                application_number=patent.application_number,
+                task=self.task_id,
+            )
+        except OversizedPromptError as exc:
+            append_oversized_record(
+                application_number=exc.application_number,
+                task=exc.task,
+                prompt_tokens=exc.prompt_tokens,
+                input_budget=exc.input_budget,
+                n_claims_original=exc.n_claims_original,
+            )
+            return None
+
+        payload = chat_json(self.client, fitted.messages, expect=dict)
         question = str(payload.get("question") or "").strip()
         answer = str(payload.get("answer") or "").strip()
         if not question or not answer:
@@ -76,10 +103,12 @@ class MRCTask(Task):
 
         return self._record(
             patent,
-            instruction=instruction,
+            instruction=sft_instruction,
             input_text=format_mrc_input(
                 question=question,
-                claims=patent.claims_text,
+                # Persist the claims actually sent to the teacher when trimmed.
+                claims=fitted.claims_text_sent,
             ),
             output_text=answer,
+            **self._fit_meta(fitted),
         )
