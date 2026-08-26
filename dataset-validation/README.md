@@ -36,11 +36,8 @@ model's expected runtime context length, trust setting, and required document
 prefix; a context-length mismatch fails validation rather than silently
 truncating.
 
-Compare all four models without touching validation outputs:
-
-```bash
-.venv/bin/python scripts/compare_embedding_models.py
-```
+Switch models with `--embedding-model granite` (or `granite_small` / `minilm`)
+without editing thresholds.
 
 Faithfulness (ipc_reasoning only, MiniCheck-Flan-T5-Large, **non-gating**):
 

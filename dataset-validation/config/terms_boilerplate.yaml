@@ -1,0 +1,170 @@
+# Deterministic patent boilerplate / stop terms for Terms Coverage.
+# Inspect and edit freely; changes affect terms_coverage only (no pass/fail gate).
+# Quote YAML booleans (no/on/off/yes/true/false) so they stay strings.
+
+stopwords:
+  - a
+  - an
+  - the
+  - and
+  - or
+  - of
+  - to
+  - "in"
+  - "on"
+  - for
+  - with
+  - by
+  - from
+  - as
+  - at
+  - is
+  - are
+  - be
+  - been
+  - being
+  - was
+  - were
+  - that
+  - this
+  - these
+  - those
+  - which
+  - who
+  - whom
+  - whose
+  - into
+  - onto
+  - upon
+  - over
+  - under
+  - between
+  - among
+  - through
+  - during
+  - before
+  - after
+  - above
+  - below
+  - out
+  - "off"
+  - up
+  - down
+  - then
+  - than
+  - too
+  - very
+  - can
+  - may
+  - might
+  - must
+  - shall
+  - will
+  - would
+  - should
+  - could
+  - "not"
+  - "no"
+  - nor
+  - so
+  - if
+  - when
+  - where
+  - while
+  - each
+  - every
+  - any
+  - all
+  - both
+  - few
+  - more
+  - most
+  - other
+  - some
+  - such
+  - only
+  - own
+  - same
+  - also
+  - just
+  - about
+  - having
+  - have
+  - has
+  - had
+  - do
+  - does
+  - did
+  - doing
+  - their
+  - its
+  - his
+  - her
+  - them
+  - they
+  - we
+  - you
+  - your
+  - our
+  - i
+  - it
+  - he
+  - she
+
+# Patent claim boilerplate (unigrams and multi-word phrases).
+boilerplate:
+  - claim
+  - claims
+  - wherein
+  - whereby
+  - comprising
+  - comprises
+  - comprise
+  - comprised
+  - including
+  - includes
+  - include
+  - consisting
+  - consists
+  - consist
+  - said
+  - accordingly
+  - according
+  - characterised
+  - characterized
+  - thereof
+  - thereto
+  - thereon
+  - therewith
+  - herein
+  - hereinafter
+  - hereto
+  - hereby
+  - method
+  - apparatus
+  - system
+  - device
+  - means
+  - step
+  - steps
+  - providing
+  - provided
+  - further
+  - preferably
+  - optional
+  - optionally
+  - respectively
+  - according to
+  - characterised in that
+  - characterized in that
+  - consisting of
+  - consisting essentially of
+  - a method of
+  - a method for
+  - an apparatus for
+  - a system for
+  - the invention
+  - present invention
+  - as claimed
+  - as recited
+  - prior art
