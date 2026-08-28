@@ -58,7 +58,7 @@ PatentBERT-style baselines: report IPC/subclass accuracy only; mark generative m
 ## Cross-cutting qualitative metrics
 
 ### LLM-as-a-judge (sample)
-Pointwise 1–5 (+ pass/fail) on model **predictions** using task rubrics adapted from Mode 2 (judge sees instruction, input, and model output; optionally gold for reference-based grading when comparing systems). Report mean score, pass rate, and top failure tags **by system × task**. Mitigate position/verbosity bias as in Zheng et al. (MT-Bench).
+Pointwise 1–5 (+ pass/fail) on model **predictions** using task rubrics adapted from Mode 2 (judge sees instruction, input, and model output; optionally gold for reference-based grading when comparing systems). Report mean score, pass rate, and top failure tags **by system × task**. Mitigate position and verbosity bias (fixed rubric, temperature 0, no generator identity in the prompt).
 
 ### Human evaluation (sample)
 Blind pairwise or Likert ratings on a stratified subsample (correctness, faithfulness, usefulness). Report agreement (e.g. Cohen’s κ) and head-to-head win/tie/lose rates for student vs strongest open baseline.

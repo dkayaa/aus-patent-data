@@ -1,0 +1,31 @@
+# Optional cheap LLM-as-a-judge (full Mode 1 passed/). Same rubric as Mode 2.
+# Not a training filter. Compare to frontier grades before cascading.
+#
+# Writes {model_slug}/<task>/cheap_judge/ — never llm_judge/.
+
+paths:
+  input_root: data/derived/instruction_generation_validation
+  output_root: data/derived/instruction_generation_validation
+  ipc_jsonl: data/ipc-codes/ipc_codes_20260101.jsonl
+  output_subdir: cheap_judge
+
+llm:
+  provider: openrouter
+  # Same family as Mode 2 Sonnet; 200k context.
+  model: anthropic/claude-haiku-4.5
+  temperature: 0.0
+  max_tokens: 2048
+  timeout_s: 180
+  max_retries: 3
+  json_object: true
+
+judge:
+  # null = every Mode 1 survivor (override with --limit or pin with --ids-file).
+  sample_size: null
+  pass_score_min: 4
+  seed: 42
+  # Chars per instruction/input/output field. 12k cut ~10% of IPC claim bundles
+  # (p95 input ~15k, max ~23k on the pinned 195). 64k ≈ 16k tokens; Haiku is 200k.
+  truncate_chars: 64000
+  shard_size: 50
+  workers: 12

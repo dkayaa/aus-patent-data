@@ -37,6 +37,7 @@ from judge_sample import (  # noqa: E402
     load_done_ids,
     load_ids_file,
     records_for_ids,
+    remaining_records,
     sample_records,
 )
 from llm import LLMClient, chat_json, llm_config_from_dict  # noqa: E402
@@ -66,8 +67,8 @@ def load_config(path: Path) -> dict[str, Any]:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description=(
-            "Mode 2 LLM-as-a-judge: sample Mode 1 passed rows and grade "
-            "pointwise with a frontier OpenRouter model (not a full-corpus pass)."
+            "LLM-as-a-judge: grade Mode 1 passed rows (Mode 2 sample by default; "
+            "cheap/full corpus with cheap_judge.yaml + --full)."
         )
     )
     p.add_argument(
@@ -83,7 +84,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--limit",
         type=int,
         default=None,
-        help="Override sample_size per task (default from YAML)",
+        help="Override sample_size per task (default from YAML). Incompatible with --full.",
+    )
+    p.add_argument(
+        "--full",
+        action="store_true",
+        help="Grade every Mode 1 passed row (no seed shuffle). Incompatible with --limit.",
     )
     p.add_argument(
         "--generator",
@@ -103,7 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         type=Path,
         default=None,
-        help="Override llm_judge output dir (implies single --task)",
+        help="Override judge output dir (implies single --task)",
     )
     p.add_argument(
         "--ids-file",
@@ -121,6 +127,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override LLM provider (default: openrouter from config)",
     )
     p.add_argument("--model", type=str, default=None, help="Override judge model")
+    p.add_argument("--base-url", default=None, help="Override llm.base_url")
     p.add_argument(
         "--workers",
         type=int,
@@ -211,7 +218,7 @@ def judge_task(
     input_dir: Path,
     output_dir: Path,
     client: LLMClient,
-    sample_size: int,
+    sample_size: int | None,
     seed: int,
     pass_score_min: int,
     truncate_chars: int,
@@ -249,6 +256,16 @@ def judge_task(
             len(done_ids),
             len(to_judge),
             sample_size_target,
+        )
+    elif sample_size is None:
+        to_judge = remaining_records(all_records, skip_ids=done_ids)
+        sample_size_target = len(all_records)
+        log.info(
+            "%s: %d Mode1 passed, %d already judged, full remaining %d",
+            task_id,
+            len(all_records),
+            len(done_ids),
+            len(to_judge),
         )
     else:
         to_judge = sample_records(
@@ -375,7 +392,8 @@ def judge_task(
         "task": task_id,
         "n_mode1_passed": len(all_records),
         "sample_size_target": sample_size_target,
-        "seed": None if pin_ids is not None else seed,
+        "full_corpus": pin_ids is None and sample_size is None,
+        "seed": None if pin_ids is not None or sample_size is None else seed,
         "ids_file": str(ids_file) if ids_file is not None else None,
         "n_ids_missing": len(missing_ids),
         "n_judged": n_judged,
@@ -392,7 +410,11 @@ def judge_task(
         "failure_tag_counts": dict(merged_tags.most_common()),
         "input_dir": str(input_dir),
         "output_dir": str(output_dir),
-        "note": "Sample-based Mode 2 judge; not a full-corpus pass. pass is score >= pass_score_min.",
+        "note": (
+            "Full-corpus cheap judge; not a training filter. pass is score >= pass_score_min."
+            if pin_ids is None and sample_size is None
+            else "Sample-based Mode 2 judge; not a full-corpus pass. pass is score >= pass_score_min."
+        ),
         "_scores": all_scores,
     }
 
@@ -470,6 +492,9 @@ def _judge_parallel(
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.full and args.limit is not None:
+        log.error("--full is incompatible with --limit")
+        return 2
     cfg = load_config(_resolve(args.config) if not args.config.is_absolute() else args.config)
 
     paths = cfg.get("paths") or {}
@@ -488,11 +513,19 @@ def main(argv: list[str] | None = None) -> int:
     else:
         log.warning("WIPO catalog missing (%s); IPC judge will lack definition_statement", ipc_jsonl)
 
-    sample_size = int(args.limit if args.limit is not None else judge_cfg.get("sample_size", 50))
+    sample_size: int | None
+    if args.full:
+        sample_size = None
+    elif args.limit is not None:
+        sample_size = int(args.limit)
+    else:
+        raw_size = judge_cfg.get("sample_size", 50)
+        sample_size = None if raw_size is None else int(raw_size)
     seed = int(judge_cfg.get("seed", 42))
     pass_score_min = int(judge_cfg.get("pass_score_min", 4))
     truncate_chars = int(judge_cfg.get("truncate_chars", 12000))
     shard_size = int(judge_cfg.get("shard_size", 50))
+    output_subdir = str(paths.get("output_subdir") or "llm_judge")
     workers = args.workers if args.workers is not None else judge_cfg.get("workers")
     workers = max(1, int(workers or 1))
 
@@ -517,6 +550,8 @@ def main(argv: list[str] | None = None) -> int:
         overrides["provider"] = args.provider
     if args.model:
         overrides["model"] = args.model
+    if args.base_url:
+        overrides["base_url"] = args.base_url
     llm_cfg = llm_config_from_dict(llm_raw, overrides=overrides)
     client = LLMClient(llm_cfg)
     log.info("Judge provider=%s model=%s workers=%s", llm_cfg.provider, llm_cfg.model, workers)
@@ -551,7 +586,7 @@ def main(argv: list[str] | None = None) -> int:
             out_dir = _resolve(args.output_dir)
         else:
             assert gen_dir is not None
-            out_dir = gen_dir / task_id / "llm_judge"
+            out_dir = gen_dir / task_id / output_subdir
         try:
             reports.append(
                 judge_task(
@@ -575,7 +610,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     summary_dir = gen_dir if gen_dir is not None else output_root
-    summary_path = summary_dir / "llm_judge_summary.json"
+    summary_path = summary_dir / f"{output_subdir}_summary.json"
     summary = {
         "tasks": [
             {
@@ -587,7 +622,12 @@ def main(argv: list[str] | None = None) -> int:
             }
             for r in reports
         ],
-        "note": "Sample-based Mode 2; see per-task llm_judge/report.json",
+        "output_subdir": output_subdir,
+        "note": (
+            "Cheap/full judge; see per-task cheap_judge/report.json"
+            if output_subdir != "llm_judge"
+            else "Sample-based Mode 2; see per-task llm_judge/report.json"
+        ),
     }
     if len(reports) > 1 or args.all:
         summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")

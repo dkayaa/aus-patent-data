@@ -172,9 +172,18 @@ class PayloadTests(unittest.TestCase):
         score_at = user.find('"score"')
         self.assertGreater(rationale_at, 0)
         self.assertGreater(score_at, rationale_at)
+        self.assertIn("chain of thought", messages[0]["content"].lower())
+        self.assertIn("before the score field", user)
         self.assertNotIn('"pass"', user.split("Example to evaluate:")[0])
         self.assertIn("Catalog definition text.", user)
         self.assertNotIn("meta-llama/llama-3.3-70b-instruct", user)
+
+    def test_reasoning_alias_fills_rationale(self) -> None:
+        result = normalize_judge_result(
+            {"score": 4, "reasoning": "stepwise check", "failure_tags": []},
+            task="mrc",
+        )
+        self.assertEqual(result["rationale"], "stepwise check")
 
 
 if __name__ == "__main__":

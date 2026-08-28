@@ -7,12 +7,13 @@ paths:
   output_root: data/derived/instruction_generation_validation
   # WIPO catalog for ipc_reasoning judge grounding (title + definition)
   ipc_jsonl: data/ipc-codes/ipc_codes_20260101.jsonl
+  output_subdir: llm_judge
 
 llm:
   provider: openrouter
   model: anthropic/claude-sonnet-4.6
   temperature: 0
-  max_tokens: 1024
+  max_tokens: 2048
   timeout_s: 120
   max_retries: 3
 

@@ -26,7 +26,7 @@ Work is organized by **pipeline stage**, not by language or framework:
 | Enrich | `scrape/` | Call IP Australia (and related) APIs to fetch semantic text for known application numbers. Does not invent the application list. |
 | Label | `classification/` | Apply taxonomies, rules, or models. No API fetching of patent text. |
 | Instruction SFT | `instruction-generation/` | Synthetic instruction-tuning JSONL from cleaned patents + IPC catalog via LLM (local or OpenRouter). |
-| Dataset validation | `dataset-validation/` | Mode 1 programmatic checks + Mode 2 LLM-as-a-judge (sample of Mode 1 `passed/`). |
+| Dataset validation | `dataset-validation/` | Mode 1 programmatic checks + optional cheap LLM judge + Mode 2 LLM-as-a-judge (sample of Mode 1 `passed/`). |
 | Eval | `evaluation/` | Frozen temporal test split of Mode 1 `passed/` + OpenRouter zero-shot / 3-shot baselines + automatic scores. |
 
 ### Hard rules
@@ -65,7 +65,7 @@ data/raw/application-toy.csv   (IP Rapid seed: IDs + status/dates)
             └─► instruction-generation/ ── synthetic SFT JSONL ──► data/derived/instruction_generation/{model_slug}/
                         │
                         ▼
-              dataset-validation/ ── Mode 1 passed/ + Mode 2 sample ──► data/derived/instruction_generation_validation/
+              dataset-validation/ ── Mode 1 passed/ + optional cheap_judge + Mode 2 sample ──► data/derived/instruction_generation_validation/
                         │
                         ▼
                   evaluation/ ── frozen splits + OpenRouter baselines ──► data/derived/evaluation/

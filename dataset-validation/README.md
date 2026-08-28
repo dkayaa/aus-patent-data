@@ -5,6 +5,7 @@ Validation of seed instruction JSONL after `instruction-generation/`.
 | Mode | What | Entry |
 |------|------|--------|
 | **1** Programmatic | Schema/IPC (WIPO catalog), ROUGE-L, MRC best-span F1, Nomic cosine (IPC vs WIPO + claims; abstract vs claims pairing) | `scripts/validate_instruction_data.py` |
+| **Cheap judge** (optional) | Same rubric as Mode 2; Claude Haiku 4.5; **all** Mode 1 `passed/` (or pinned IDs). Not a training filter until cascade enrichment is positive. | `scripts/cheap_judge_instruction_data.py` |
 | **2** LLM-as-a-judge | Sample Mode 1 `passed/` rows; pointwise 1–5; `pass` from `score >= 4`; closed tags | `scripts/judge_instruction_data.py` |
 
 Methodology: [`methodologies/02-dataset-validation/`](../methodologies/02-dataset-validation/).
@@ -72,6 +73,37 @@ Requires `OPENROUTER_API_KEY` in the environment (load `.env` as above). `--gene
 
 Config: [`config/llm_judge.yaml`](config/llm_judge.yaml). Rubrics: [`src/judge_prompts.py`](src/judge_prompts.py).
 
+## Cheap judge (optional cascade screen)
+
+Same prompts and `pass_score_min` as Mode 2. Writes `{task}/cheap_judge/`, never `llm_judge/`. Default YAML grades **every** Mode 1 survivor (`sample_size: null`) with OpenRouter `anthropic/claude-haiku-4.5`. Pin the Mode 2 IDs first to measure enrichment.
+
+```bash
+# OpenRouter Claude Haiku 4.5 (default cheap_judge.yaml)
+set -a && source .env && set +a
+.venv/bin/python scripts/cheap_judge_instruction_data.py --task ipc_reasoning \
+  --generator meta-llama/llama-3.3-70b-instruct \
+  --ids-file data/derived/instruction_generation_validation/meta-llama-llama-3.3-70b-instruct/ipc_reasoning/llm_judge/done_ids.txt
+
+# Full Mode 1 passed/ for one task
+.venv/bin/python scripts/cheap_judge_instruction_data.py --task ipc_reasoning \
+  --generator meta-llama/llama-3.3-70b-instruct
+
+# Local Ollama instead
+.venv/bin/python scripts/cheap_judge_instruction_data.py --task ipc_reasoning \
+  --provider local --model llama3.1:8b --base-url http://127.0.0.1:11434/v1 --workers 1
+```
+
+Then:
+
+```bash
+.venv/bin/python scripts/calibrate_llm_judge.py \
+  --generator meta-llama/llama-3.3-70b-instruct --task ipc_reasoning
+```
+
+Writes `{model_slug}/cheap_judge_cascade.json` when both `cheap_judge/` and `llm_judge/` exist. Hinge: `frontier_pass_rate_given_cheap_pass` vs `frontier_pass_rate` (`enrichment`). Do **not** feed Mode 2 from `cheap_judge/passed/` unless enrichment is clearly positive. Do not train on cheap-pass shards.
+
+Equivalent to `scripts/judge_instruction_data.py --config dataset-validation/config/cheap_judge.yaml …`. `--full` forces a full corpus pass even with the Mode 2 YAML (expensive on Sonnet).
+
 ## Mode 2 calibration hook
 
 ```bash
@@ -81,4 +113,4 @@ Config: [`config/llm_judge.yaml`](config/llm_judge.yaml). Rubrics: [`src/judge_p
   --generator meta-llama/llama-3.3-70b-instruct --export-csv
 ```
 
-Prints score histograms, pass rates, and tag counts. If `{model_slug}/human_audit.jsonl` exists, also writes Cohen’s κ, a confusion matrix, and a `pass_score_min` sweep to `{model_slug}/llm_judge_calibration.json`. `--export-csv` writes a **blind** audit spreadsheet (no judge scores).
+Prints score histograms, pass rates, and tag counts. If `{task}/cheap_judge/` exists, also writes cheap↔frontier cascade stats to `{model_slug}/cheap_judge_cascade.json`. If `{model_slug}/human_audit.jsonl` exists, also writes Cohen’s κ, a confusion matrix, and a `pass_score_min` sweep to `{model_slug}/llm_judge_calibration.json`. `--export-csv` writes a **blind** audit spreadsheet (no judge scores).

@@ -12,6 +12,7 @@ if str(SRC) not in sys.path:
 
 from run_calibrate_judge import (  # noqa: E402
     agreement_for_threshold,
+    cascade_vs_frontier,
     cohens_kappa,
     human_accept_to_bool,
     pair_human_judge,
@@ -51,6 +52,49 @@ class KappaTests(unittest.TestCase):
         ]
         pairs = pair_human_judge(judged, human, task="mrc")
         self.assertEqual(pairs, [(True, 5)])
+
+
+class CascadeTests(unittest.TestCase):
+    def test_enrichment_positive_when_cheap_keeps_frontier_passes(self) -> None:
+        def rec(app: str, score: int, passed: bool) -> dict:
+            return {
+                "application_number": app,
+                "meta": {"llm_judge": {"score": score, "pass": passed}},
+            }
+
+        cheap = [
+            rec("a", 4, True),
+            rec("b", 4, True),
+            rec("c", 2, False),
+            rec("d", 2, False),
+        ]
+        frontier = [
+            rec("a", 5, True),
+            rec("b", 4, True),
+            rec("c", 3, False),
+            rec("d", 2, False),
+        ]
+        out = cascade_vs_frontier(cheap, frontier, pass_score_min=4)
+        self.assertEqual(out["n_paired"], 4)
+        self.assertEqual(out["frontier_pass_rate"], 0.5)
+        self.assertEqual(out["frontier_pass_rate_given_cheap_pass"], 1.0)
+        self.assertEqual(out["enrichment"], 0.5)
+        self.assertEqual(out["n_false_kills"], 0)
+        self.assertEqual(out["n_missed_junk"], 0)
+
+    def test_false_kills_and_missed_junk(self) -> None:
+        def rec(app: str, score: int, passed: bool) -> dict:
+            return {
+                "application_number": app,
+                "meta": {"llm_judge": {"score": score, "pass": passed}},
+            }
+
+        cheap = [rec("keep", 4, True), rec("kill", 2, False)]
+        frontier = [rec("keep", 2, False), rec("kill", 5, True)]
+        out = cascade_vs_frontier(cheap, frontier, pass_score_min=4)
+        self.assertEqual(out["n_false_kills"], 1)
+        self.assertEqual(out["n_missed_junk"], 1)
+        self.assertEqual(out["frontier_pass_rate_given_cheap_pass"], 0.0)
 
 
 if __name__ == "__main__":

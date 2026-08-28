@@ -55,7 +55,7 @@ Task-specific (optional 1–5, same fail/in-scope rules as Mode 2):
 ### What to report in the paper
 * Human accept rate by task
 * Inter-annotator agreement
-* Human ↔ LLM-judge agreement (echoing Zheng et al.’s validation style, at our domain scale)
+* Human ↔ LLM-judge agreement
 * Chosen `pass_score_min` after the sweep
 * Qualitative failure modes (bullet list from notes)
 

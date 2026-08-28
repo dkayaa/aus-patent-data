@@ -30,6 +30,9 @@ from judge_prompts import TASKS, wipo_fields_for_record  # noqa: E402
 DEFAULT_CONFIG = REPO_ROOT / "dataset-validation" / "config" / "llm_judge.yaml"
 HUMAN_AUDIT_FILENAME = "human_audit.jsonl"
 CALIBRATION_FILENAME = "llm_judge_calibration.json"
+CASCADE_FILENAME = "cheap_judge_cascade.json"
+CHEAP_SUBDIR = "cheap_judge"
+FRONTIER_SUBDIR = "llm_judge"
 THRESHOLDS = (3, 4, 5)
 
 log = logging.getLogger("calibrate_llm_judge")
@@ -167,6 +170,94 @@ def agreement_for_threshold(
     }
 
 
+def cascade_vs_frontier(
+    cheap: list[dict[str, Any]],
+    frontier: list[dict[str, Any]],
+    *,
+    pass_score_min: int = 4,
+) -> dict[str, Any]:
+    """Compare cheap-judge pass vs frontier (Mode 2) on overlapping IDs.
+
+    Hinge metric: P(frontier pass | cheap pass) vs unconditional frontier pass rate.
+    """
+    cheap_by: dict[str, dict[str, Any]] = {}
+    for rec in cheap:
+        app = str(rec.get("application_number") or "").strip()
+        if app:
+            cheap_by[app] = rec
+    frontier_by: dict[str, dict[str, Any]] = {}
+    for rec in frontier:
+        app = str(rec.get("application_number") or "").strip()
+        if app:
+            frontier_by[app] = rec
+
+    cheap_pass: list[bool] = []
+    frontier_pass: list[bool] = []
+    frontier_scores: list[int] = []
+    for app in sorted(set(cheap_by) & set(frontier_by)):
+        cj = _judge_meta(cheap_by[app])
+        fj = _judge_meta(frontier_by[app])
+        if "score" not in cj or "score" not in fj:
+            continue
+        cs = int(cj["score"])
+        fs = int(fj["score"])
+        cp = bool(cj["pass"]) if "pass" in cj else cs >= pass_score_min
+        fp = bool(fj["pass"]) if "pass" in fj else fs >= pass_score_min
+        cheap_pass.append(cp)
+        frontier_pass.append(fp)
+        frontier_scores.append(fs)
+
+    n = len(cheap_pass)
+    n_cheap_pass = sum(cheap_pass)
+    n_frontier_pass = sum(frontier_pass)
+    n_both_pass = sum(1 for c, f in zip(cheap_pass, frontier_pass) if c and f)
+    n_false_kills = sum(1 for c, f in zip(cheap_pass, frontier_pass) if (not c) and f)
+    n_missed_junk = sum(
+        1
+        for c, fs in zip(cheap_pass, frontier_scores)
+        if c and fs <= 2
+    )
+    frontier_rate = (n_frontier_pass / n) if n else None
+    given_cheap = (n_both_pass / n_cheap_pass) if n_cheap_pass else None
+    enrichment = (
+        given_cheap - frontier_rate
+        if given_cheap is not None and frontier_rate is not None
+        else None
+    )
+    n_agree = sum(1 for c, f in zip(cheap_pass, frontier_pass) if c == f)
+    return {
+        "n_paired": n,
+        "n_cheap_only": len(set(cheap_by) - set(frontier_by)),
+        "n_frontier_only": len(set(frontier_by) - set(cheap_by)),
+        "cheap_pass_rate": (n_cheap_pass / n) if n else None,
+        "frontier_pass_rate": frontier_rate,
+        "frontier_pass_rate_given_cheap_pass": given_cheap,
+        "enrichment": enrichment,
+        "pct_agreement": (n_agree / n) if n else None,
+        "cohens_kappa": cohens_kappa(cheap_pass, frontier_pass) if n else None,
+        "n_false_kills": n_false_kills,
+        "n_missed_junk": n_missed_junk,
+        "confusion": {
+            "cheap_pass_frontier_pass": n_both_pass,
+            "cheap_pass_frontier_fail": sum(
+                1 for c, f in zip(cheap_pass, frontier_pass) if c and (not f)
+            ),
+            "cheap_fail_frontier_pass": n_false_kills,
+            "cheap_fail_frontier_fail": sum(
+                1 for c, f in zip(cheap_pass, frontier_pass) if (not c) and (not f)
+            ),
+            "n": n,
+        },
+        "note": (
+            "enrichment = P(frontier pass | cheap pass) - P(frontier pass). "
+            "Positive means the cheap gate concentrates Mode 2 4–5s. "
+            "false_kills = cheap fail & frontier pass. "
+            "missed_junk = cheap pass & frontier score ≤ 2. "
+            "Not a training filter until enrichment is clearly positive."
+        ),
+    }
+
+
 def pair_human_judge(
     judged: list[dict[str, Any]],
     human_rows: list[dict[str, Any]],
@@ -243,8 +334,9 @@ def export_blind_csv(
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description=(
-            "Summarize Mode 2 LLM-judge distributions; if human_audit.jsonl "
-            "exists, compute agreement and a pass_score_min sweep."
+            "Summarize Mode 2 LLM-judge distributions; if cheap_judge/ exists, "
+            "compare cascade vs frontier; if human_audit.jsonl exists, compute "
+            "agreement and a pass_score_min sweep."
         )
     )
     p.add_argument(
@@ -307,12 +399,13 @@ def main(argv: list[str] | None = None) -> int:
         "tasks": [],
         "note": (
             "pass is score >= pass_score_min. Human accept: yes→accept; "
-            "no/fix→reject. Threshold sweep is empty until human_audit.jsonl exists."
+            "no/fix→reject. Threshold sweep is empty until human_audit.jsonl exists. "
+            "Cascade block is empty until cheap_judge/ exists for the task."
         ),
     }
 
     for task_id in tasks:
-        judge_dir = gen_dir / task_id / "llm_judge"
+        judge_dir = gen_dir / task_id / FRONTIER_SUBDIR
         judged = load_judged_records(judge_dir)
         dist = task_distribution(judged)
         block: dict[str, Any] = {"task": task_id, **dist}
@@ -345,6 +438,26 @@ def main(argv: list[str] | None = None) -> int:
                 f"{agr['cohens_kappa']:.3f}" if agr["cohens_kappa"] is not None else "n/a",
             )
 
+        cheap_dir = gen_dir / task_id / CHEAP_SUBDIR
+        cheap_recs = load_judged_records(cheap_dir)
+        if cheap_recs and judged:
+            operating = int((cfg.get("judge") or {}).get("pass_score_min", 4))
+            cascade = cascade_vs_frontier(
+                cheap_recs, judged, pass_score_min=operating
+            )
+            block["cascade_vs_frontier"] = cascade
+            log.info(
+                "%s cheap↔frontier: n=%s enrichment=%s given_cheap=%s false_kills=%s missed_junk=%s",
+                task_id,
+                cascade["n_paired"],
+                f"{cascade['enrichment']:.3f}" if cascade["enrichment"] is not None else "n/a",
+                f"{cascade['frontier_pass_rate_given_cheap_pass']:.2%}"
+                if cascade["frontier_pass_rate_given_cheap_pass"] is not None
+                else "n/a",
+                cascade["n_false_kills"],
+                cascade["n_missed_junk"],
+            )
+
         if args.export_csv:
             # Blind: Mode 1 passed rows for judged IDs, no llm_judge fields
             passed_dir = gen_dir / task_id / "passed"
@@ -366,6 +479,27 @@ def main(argv: list[str] | None = None) -> int:
             log.info("Wrote blind CSV %s (%d rows)", csv_path, len(blind))
 
     out_path = gen_dir / CALIBRATION_FILENAME
+    cascade_tasks = [t for t in report["tasks"] if t.get("cascade_vs_frontier")]
+    if cascade_tasks:
+        cascade_path = gen_dir / CASCADE_FILENAME
+        cascade_path.write_text(
+            json.dumps(
+                {
+                    "generator": gen_dir.name,
+                    "tasks": [
+                        {
+                            "task": t["task"],
+                            **t["cascade_vs_frontier"],
+                        }
+                        for t in cascade_tasks
+                    ],
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        log.info("Wrote %s", cascade_path)
     if human_rows:
         out_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         log.info("Wrote %s", out_path)

@@ -25,6 +25,7 @@ class LLMConfig:
     max_tokens: int = 1024
     timeout_s: float = 120.0
     max_retries: int = 3
+    json_object: bool = False
 
 
 def llm_config_from_dict(raw: dict[str, Any], *, overrides: dict[str, Any] | None = None) -> LLMConfig:
@@ -81,6 +82,7 @@ def llm_config_from_dict(raw: dict[str, Any], *, overrides: dict[str, Any] | Non
         max_tokens=int(merged.get("max_tokens", 1024)),
         timeout_s=float(merged.get("timeout_s", 120)),
         max_retries=int(merged.get("max_retries", 3)),
+        json_object=bool(merged.get("json_object", False)),
     )
 
 
@@ -109,12 +111,15 @@ class LLMClient:
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> str:
-        resp = self._openai().chat.completions.create(
-            model=self.config.model,
-            messages=messages,  # type: ignore[arg-type]
-            temperature=self.config.temperature if temperature is None else temperature,
-            max_tokens=self.config.max_tokens if max_tokens is None else max_tokens,
-        )
+        kwargs: dict[str, Any] = {
+            "model": self.config.model,
+            "messages": messages,  # type: ignore[arg-type]
+            "temperature": self.config.temperature if temperature is None else temperature,
+            "max_tokens": self.config.max_tokens if max_tokens is None else max_tokens,
+        }
+        if self.config.json_object:
+            kwargs["response_format"] = {"type": "json_object"}
+        resp = self._openai().chat.completions.create(**kwargs)
         choice = resp.choices[0].message
         content = choice.content if choice else None
         if not content:

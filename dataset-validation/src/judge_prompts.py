@@ -1,4 +1,4 @@
-"""Per-task LLM-as-a-judge rubrics (pointwise, G-Eval-style)."""
+"""Per-task LLM-as-a-judge rubrics (pointwise)."""
 
 from __future__ import annotations
 
@@ -13,14 +13,24 @@ TASKS = (
 
 JUDGE_SYSTEM = (
     "You are an expert evaluator of patent instruction-tuning examples. "
-    "Score the example using the task rubric. "
-    "Write the rationale first, then choose the score from that rationale. "
+    "Write a chain of thought that checks each rubric criterion, "
+    "then choose the score from that reasoning. Never pick the score first. "
     "Do not rewrite the example. Reply with JSON only."
 )
 
+# CoT evaluation steps, then the rating.
+_EVAL_PROCEDURE = """Evaluation procedure (complete every step in rationale before the score field):
+1. Restate the instruction, what the input contains, and what the output claims.
+2. Check each rubric criterion against quoted spans from the example (not from memory).
+3. Decide which allowed failure_tags apply, if any.
+4. Only then assign score 1-5 that follows from steps 1-3. Score >= 4 means usable for SFT.
+Do not put a score number in the rationale."""
+
 _JSON_SCHEMA = (
-    "Respond with a single JSON object only, no markdown:\n"
-    '{"rationale": "<short explanation>", "score": <int 1-5>, '
+    "Respond with a single JSON object only, no markdown. "
+    "Emit keys in this order: rationale, score, failure_tags.\n"
+    '{"rationale": "<chain of thought for steps 1-3; no score number>", '
+    '"score": <int 1-5>, '
     '"failure_tags": ["tag", ...]}'
 )
 
@@ -200,6 +210,7 @@ def build_judge_messages(
     )
     user = (
         f"{rubric}\n\n"
+        f"{_EVAL_PROCEDURE}\n\n"
         f"{_JSON_SCHEMA}\n\n"
         f"Example to evaluate:\n{json.dumps(payload, ensure_ascii=False, indent=2)}"
     )
@@ -240,7 +251,7 @@ def normalize_judge_result(
         raise ValueError(f"score out of range: {score}")
     # pass is derived in code; ignore any model-supplied pass field
     passed = score >= pass_score_min
-    rationale = str(raw.get("rationale") or "").strip()
+    rationale = str(raw.get("rationale") or raw.get("reasoning") or "").strip()
     return {
         "score": score,
         "pass": passed,

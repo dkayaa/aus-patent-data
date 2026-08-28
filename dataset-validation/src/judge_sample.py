@@ -73,6 +73,24 @@ def records_for_ids(
     return matched, missing
 
 
+def remaining_records(
+    records: list[dict[str, Any]],
+    *,
+    skip_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Mode 1 order, unique ids, skip already judged. No shuffle."""
+    skip = skip_ids or set()
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for rec in records:
+        app = str(rec.get("application_number") or "").strip()
+        if not app or app in seen or app in skip:
+            continue
+        seen.add(app)
+        out.append(rec)
+    return out
+
+
 def sample_records(
     records: list[dict[str, Any]],
     *,
