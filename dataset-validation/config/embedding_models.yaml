@@ -1,0 +1,38 @@
+# Registered sentence-transformers embedding models for Mode 1 semantic scoring.
+# Select via programmatic.yaml → semantic.embedding_model (key below).
+#
+# expected_max_seq_length is asserted against the RUNTIME model.max_seq_length
+# after load. Mismatch is a hard failure (the MiniLM YAML-said-512 / runtime-256
+# bug this registry exists to prevent).
+
+models:
+  minilm:
+    model_name: sentence-transformers/all-MiniLM-L6-v2
+    expected_max_seq_length: 256
+    trust_remote_code: false
+    # No task prefix.
+    document_prefix: null
+    notes: "Baseline. 256-token window; truncates ~92% of claim sets."
+
+  granite:
+    model_name: ibm-granite/granite-embedding-english-r2
+    expected_max_seq_length: 8192
+    trust_remote_code: false
+    document_prefix: null
+    notes: "ModernBERT, 149M params. Produces unnormalised vectors — we always L2-normalise."
+
+  granite_small:
+    model_name: ibm-granite/granite-embedding-small-english-r2
+    expected_max_seq_length: 8192
+    trust_remote_code: false
+    document_prefix: null
+    notes: "47M params, ~40% faster than granite. Same 8192 window."
+
+  nomic:
+    model_name: nomic-ai/nomic-embed-text-v1.5
+    expected_max_seq_length: 8192
+    trust_remote_code: true
+    # Model card requires a task instruction prefix. For semantic similarity
+    # (claims ↔ justification/abstract), both sides use search_document.
+    document_prefix: "search_document: "
+    notes: "Requires trust_remote_code and search_document: prefix on every input."
