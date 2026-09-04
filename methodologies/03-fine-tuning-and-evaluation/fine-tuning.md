@@ -2,7 +2,7 @@
 ---
 
 ## Objective
-Adapt one or more open-source instruction-capable LLMs on the validated Australian patent SFT corpus so they improve on the three seed tasks (IPC reasoning, abstract drafting, MRC) relative to their untuned base and to external baselines.
+Adapt one or more open-source instruction-capable LLMs on the validated Australian patent SFT corpus so they improve on IPC reasoning and abstract drafting relative to their untuned base and to external baselines. (MRC is retired from the active pipeline.)
 
 ## Inputs
 * Prepared flat JSONL from `scripts/prepare_sft_data.py` → `data/derived/sft/{generator_slug}/<dataset>/` (inherits frozen `evaluation/splits/` membership; do not re-split).
@@ -22,7 +22,7 @@ Document exact Hugging Face IDs, tokenizer, and chat template in the run config 
 Train a specialist adapter via `scripts/run_sft.py --dataset …` on one of:
 * `ipc_reasoning_full` — Classification + Justification
 * `ipc_reasoning_classification_only` — Classification line only (ablation)
-* `abstract_drafting` / `mrc` — pass-through gold / teacher Q–A
+* `abstract_drafting` — pass-through gold abstract
 
 Default stack: HF + PEFT QLoRA + TRL on CUDA (`sft/config/sft.yaml`; student default `meta-llama/Llama-3.1-8B-Instruct`). Train on train, validate on val, never fit on test.
 
@@ -39,13 +39,13 @@ Prefer **LoRA / QLoRA** adapters over full fine-tunes for reproducibility and co
 * Keep the generation-time instruction pools: students see diverse phrasings of the same task.
 * Prompt format: chat template of the base model; train on assistant completion of `output` given system (optional) + user (`instruction` + `input`).
 * **ipc_reasoning:** target remains `Classification: <IPC>\nJustification: …` so classification accuracy is measurable.
-* **mrc:** short extractive answers; avoid length penalties that favor verbose drafting styles.
 
 ## Splits and leakage
-* **Do not invent splits in `sft/`.** Reuse `evaluation/splits/{generator_slug}/` so the same `application_number` never appears in both train and test (assignment is global across IPC / abstract / MRC), and the temporal holdout matches baselines (`filedDate >=` YAML cutoff, currently `2024-01-01`, seed 42).
-* IPC-section stratification is desirable where possible but is **not** implemented in `evaluation/src/split.py` today; prepare does not add it.
+* **Do not invent splits in `sft/`.** Reuse `evaluation/splits/{generator_slug}/` so the same `application_number` never appears in both train and test (assignment is global across IPC / abstract), and the temporal holdout matches baselines (`filedDate >=` YAML cutoff, currently `2024-01-01`, seed 42).
+* **Generation-time IPC balance:** scaled ipc_reasoning corpora use a **per-`primary_ipc` cap** (default 1% of target) via `scripts/sample_ipc_apps.py` before `--only-ids` generation — see [`ipc-reasoning-and-classification.md`](../01-instruction-data-generation/ipc-reasoning-and-classification.md). That does **not** replace temporal split logic; `evaluation/src/split.py` still does not stratify by IPC section.
 * Freeze split manifests before any student training; prepare copies seed/cutoff into each dataset `manifest.json` when present.
 * Use one `generator_slug` end-to-end for SFT vs baseline tables.
+* Prefer reporting IPC accuracy **overall**, **by section**, and **head vs tail** so register skew remains visible even after the symbol cap.
 
 ## Non-goals
 * Continued pretraining on raw patent dumps (domain CPT) unless added as a separate ablation.

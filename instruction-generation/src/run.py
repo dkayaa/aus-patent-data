@@ -159,7 +159,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--only-ids",
         type=Path,
         default=None,
-        help="JSON/JSONL/txt list of application_numbers to regenerate only",
+        help=(
+            "JSON/JSONL/txt list of application_numbers to restrict generation to. "
+            "Already-written done_ids.txt are still skipped (use for stratified expand)."
+        ),
     )
     p.add_argument(
         "--repeat-instruction",
@@ -254,9 +257,8 @@ def run_task(
     task.setup()
 
     task_dir = task_output_dir(dest, task_id)
-    # When regenerating a specific id list, do not skip via done_ids — we are
-    # explicitly rewriting those records.
-    done = set() if only_ids else load_done_ids(task_dir)
+    # Restrict universe with --only-ids; still skip/resume via done_ids.txt.
+    done = load_done_ids(task_dir)
     writer = ShardWriter(task_dir, shard_size=shard_size)
     patents = iter_patent_texts(patents_dir, limit=None, skip_ids=done)
     if only_ids is not None:
@@ -269,14 +271,14 @@ def run_task(
     if workers == 1:
         n_ok, n_skip, n_err, n_oversized, n_trimmed = _run_serial(
             task_id, task=task, patents=patents, task_dir=task_dir,
-            writer=writer, limit=limit, append_done=only_ids is None,
+            writer=writer, limit=limit, append_done=True,
         )
     else:
         print(f"[{task_id}] workers={workers}", flush=True)
         n_ok, n_skip, n_err, n_oversized, n_trimmed = _run_parallel(
             task_id, task=task, patents=patents, task_dir=task_dir,
             writer=writer, limit=limit, workers=workers,
-            append_done=only_ids is None,
+            append_done=True,
         )
 
     flushed = writer.flush()

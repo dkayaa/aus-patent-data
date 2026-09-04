@@ -16,7 +16,10 @@ Prefer thin wrappers that call into `scrape/`, `classification/`, `instruction-g
 | `run_patentbert.py` | `classification/src/run_patentbert.py` | Claim-level CPC-subclass inference → `data/derived/patentbert/predictions.csv` |
 | `split_eval_data.py` | `evaluation/src/split.py` | Freeze temporal train/val/test + 3-shot exemplars → `data/derived/evaluation/splits/` |
 | `run_baselines.py` | `evaluation/src/run_baseline.py` | OpenRouter zero-shot / 3-shot on frozen test IDs |
-| `score_baselines.py` | `evaluation/src/score.py` | Automatic IPC / abstract / MRC scores → `data/derived/evaluation/scores/` |
+| `score_baselines.py` | `evaluation/src/score.py` | Automatic IPC / abstract scores → `data/derived/evaluation/scores/` |
+| `prepare_sft_data.py` | `sft/src/prepare.py` | Flat SFT JSONL from frozen eval splits → `data/derived/sft/` |
+| `run_sft.py` | `sft/src/run_train.py` | Per-dataset QLoRA (CUDA) → `data/derived/sft/runs/` |
+| `sample_ipc_apps.py` | `instruction-generation/src/sample_ipc_apps.py` | Stratified app list (per-`primary_ipc` cap) for `--only-ids` |
 
 ### PatentBERT (requires TF1 env — not root `.venv`)
 
