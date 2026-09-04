@@ -32,7 +32,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description=(
             "Sample eligible patents for ipc_reasoning with a max fraction "
-            "per primary_ipc symbol (default 1% of --target)."
+            "per primary_ipc symbol (default 1% of --target). Requires a WIPO "
+            "definition_statement (same rule as IPCReasoningTask.eligible)."
         )
     )
     p.add_argument(
@@ -54,8 +55,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--max-per-symbol-frac",
         type=float,
-        default=0.01,
-        help="Max share of --target from any single primary_ipc (default 0.01)",
+        default=0.005,
+        help="Max share of --target from any single primary_ipc (default 0.005 = 0.5%)",
     )
     p.add_argument("--seed", type=int, default=42)
     p.add_argument(
@@ -112,19 +113,26 @@ def main(argv: list[str] | None = None) -> int:
     eligible: list[tuple[str, str]] = []
     n_no_ipc = 0
     n_unknown_ipc = 0
+    n_no_definition = 0
     for patent in iter_patent_texts(patents_dir):
         code = _normalize_ipc(patent.primary_ipc)
         if not code:
             n_no_ipc += 1
             continue
-        if lookup.get(code) is None:
+        entry = lookup.get(code)
+        if entry is None:
             n_unknown_ipc += 1
+            continue
+        # Match IPCReasoningTask.eligible: need WIPO definition_statement.
+        if not entry.definition_statement:
+            n_no_definition += 1
             continue
         eligible.append((patent.application_number, code))
 
     print(
-        f"Eligible (claims+abstract+known primary_ipc): {len(eligible)} "
-        f"(skipped no_ipc={n_no_ipc} unknown_ipc={n_unknown_ipc})",
+        f"Eligible (claims+abstract+known primary_ipc+definition): {len(eligible)} "
+        f"(skipped no_ipc={n_no_ipc} unknown_ipc={n_unknown_ipc} "
+        f"no_definition={n_no_definition})",
         flush=True,
     )
 
@@ -172,6 +180,7 @@ def main(argv: list[str] | None = None) -> int:
         "n_eligible": len(eligible),
         "n_skipped_no_ipc": n_no_ipc,
         "n_skipped_unknown_ipc": n_unknown_ipc,
+        "n_skipped_no_definition": n_no_definition,
         "n_walk_rejected_at_cap": n_rejected_cap,
         "n_unique_symbols": len(per_symbol),
         "section_counts": dict(sorted(section_counts.items())),

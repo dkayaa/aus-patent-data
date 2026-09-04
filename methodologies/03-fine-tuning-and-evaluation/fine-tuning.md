@@ -42,7 +42,7 @@ Prefer **LoRA / QLoRA** adapters over full fine-tunes for reproducibility and co
 
 ## Splits and leakage
 * **Do not invent splits in `sft/`.** Reuse `evaluation/splits/{generator_slug}/` so the same `application_number` never appears in both train and test (assignment is global across IPC / abstract), and the temporal holdout matches baselines (`filedDate >=` YAML cutoff, currently `2024-01-01`, seed 42).
-* **Generation-time IPC balance:** scaled ipc_reasoning corpora use a **per-`primary_ipc` cap** (default 1% of target) via `scripts/sample_ipc_apps.py` before `--only-ids` generation — see [`ipc-reasoning-and-classification.md`](../01-instruction-data-generation/ipc-reasoning-and-classification.md). That does **not** replace temporal split logic; `evaluation/src/split.py` still does not stratify by IPC section.
+* **Generation-time IPC balance:** scaled ipc_reasoning corpora use a **per-`primary_ipc` cap** (default 0.5% of target) via `scripts/sample_ipc_apps.py` before `--only-ids` generation — see [`ipc-reasoning-and-classification.md`](../01-instruction-data-generation/ipc-reasoning-and-classification.md). That does **not** replace temporal split logic; `evaluation/src/split.py` still does not stratify by IPC section.
 * Freeze split manifests before any student training; prepare copies seed/cutoff into each dataset `manifest.json` when present.
 * Use one `generator_slug` end-to-end for SFT vs baseline tables.
 * Prefer reporting IPC accuracy **overall**, **by section**, and **head vs tail** so register skew remains visible even after the symbol cap.

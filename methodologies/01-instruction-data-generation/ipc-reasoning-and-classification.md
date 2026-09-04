@@ -26,12 +26,12 @@ The cleaned AU register dump is heavily skewed toward a small set of frequent IP
 
 **What we do:** Before generation at scale, freeze an application list with a **per-`primary_ipc` cap**:
 
-* Eligible apps: claims + abstract + `primary_ipc` present in the WIPO catalog (same eligibility as ipc_reasoning generation).
-* Shuffle with a fixed seed (default 42), then greedily accept apps until `--target` (e.g. 10 000), refusing any symbol that already has `⌊target × max_per_symbol_frac⌋` apps (default **1%** → cap 100 at target 10k).
+* Eligible apps: claims + abstract + `primary_ipc` with a WIPO **`definition_statement`** (same rule as generation `eligible()`; title-only catalog places are excluded).
+* Shuffle with a fixed seed (default 42), then greedily accept apps until `--target` (e.g. 10 000), refusing any symbol that already has `⌊target × max_per_symbol_frac⌋` apps (default **0.5%** → cap 50 at target 10k).
 * No section-level quota: section A may still be the plurality; we only stop a **single full symbol** from eating the set.
 * Artifact: `scripts/sample_ipc_apps.py` → `data/derived/instruction_generation/_samples/<name>.txt` (+ `.manifest.json`). Generation uses `--only-ids` on that file (still resumes via `done_ids.txt`).
 
-**Why not section caps / equal-per-code:** Equalizing all ~58k symbols is impossible; hard section quotas fight the natural register and scarce sections. A 1% symbol cap is a light, auditable rebalance that preserves AU realism while making head-vs-tail evaluation meaningful. Report exact IPC **overall**, and prefer also **by section** and **head vs tail** at scoring time (eval split remains temporal + app-holdout; it does not re-stratify).
+**Why not section caps / equal-per-code:** Equalizing all ~58k symbols is impossible; hard section quotas fight the natural register and scarce sections. A **0.5%** symbol cap is a light, auditable rebalance that preserves AU realism while spreading mass across more codes (at 10k target: at most 50 apps per `primary_ipc`). Requiring a WIPO `definition_statement` further shrinks the pool (~9% of catalog-known primaries) and shifts section mix toward places with definitions (often G/H). Report exact IPC **overall**, and prefer also **by section** and **head vs tail** at scoring time (eval split remains temporal + app-holdout; it does not re-stratify).
 
 ## Generation Workflow
 1.  **Sample apps (scaled runs):** Optionally build the capped id list above; otherwise shard order applies.
