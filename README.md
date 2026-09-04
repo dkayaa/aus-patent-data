@@ -28,12 +28,13 @@ Work is organized by **pipeline stage**, not by language or framework:
 | Instruction SFT | `instruction-generation/` | Synthetic instruction-tuning JSONL from cleaned patents + IPC catalog via LLM (local or OpenRouter). |
 | Dataset validation | `dataset-validation/` | Mode 1 programmatic checks + optional cheap LLM judge + Mode 2 LLM-as-a-judge (sample of Mode 1 `passed/`). |
 | Eval | `evaluation/` | Frozen temporal test split of Mode 1 `passed/` + OpenRouter zero-shot / 3-shot baselines + automatic scores. |
+| Train SFT | `sft/` | Flat SFT JSONL from frozen eval splits + per-dataset QLoRA (TRL/PEFT, CUDA). Does not invent splits. |
 
 ### Hard rules
 
-1. **Do not mix stages.** API clients and downloaders stay in `scrape/`. Labeling stays in `classification/`. Synthetic SFT generation stays in `instruction-generation/`. Validation scoring stays in `dataset-validation/`. Baseline eval stays in `evaluation/`.
+1. **Do not mix stages.** API clients and downloaders stay in `scrape/`. Labeling stays in `classification/`. Synthetic SFT generation stays in `instruction-generation/`. Validation scoring stays in `dataset-validation/`. Baseline eval stays in `evaluation/`. Student QLoRA stays in `sft/`.
 2. **Scrape is enrichment, not discovery.** The application universe comes from IP Rapid (or a full dump later). Scrapers take `application_number` (and related IDs) from `data/raw/` and fetch text/metadata from IP Australia.
-3. **Pipeline direction:** `data/raw` (base) → `scrape/` → enriched artifacts in `data/` → (`classification/` and/or `instruction-generation/` → `dataset-validation/` → `evaluation/`) → `data/derived/` / `data/processed/`.
+3. **Pipeline direction:** `data/raw` (base) → `scrape/` → enriched artifacts in `data/` → (`classification/` and/or `instruction-generation/` → `dataset-validation/` → `evaluation/` → `sft/`) → `data/derived/` / `data/processed/`.
 4. **Toy vs bulk via Git LFS.** Dataset files under `data/` (`*.csv`, `*.json`, archives, etc.) are tracked with **Git LFS** (see `.gitattributes`). Pointers live in git; blobs live in LFS storage. Install with `git lfs install` before cloning/pulling data.
 5. **Prefer importable modules over notebooks** for anything that must be reproducible for the paper.
 6. **Document sources and regeneration** in each stage README (what is read, what is written, how to run).
@@ -50,6 +51,7 @@ Work is organized by **pipeline stage**, not by language or framework:
 | Building synthetic instruction-tuning data | `instruction-generation/src/`, config in `instruction-generation/config/` |
 | Scoring Mode 1 / Mode 2 on generated SFT | `dataset-validation/src/`, config in `dataset-validation/config/` |
 | Frozen test splits and OpenRouter baselines | `evaluation/src/`, config in `evaluation/config/` |
+| Prepare SFT JSONL / QLoRA train | `sft/src/`, config in `sft/config/` (`requirements-sft.txt` on GPU) |
 | Writing pipeline glue / one-shot runners | `scripts/` |
 | Changing project-wide deps | root `pyproject.toml` / `requirements.txt` (when added) |
 
@@ -69,6 +71,9 @@ data/raw/application-toy.csv   (IP Rapid seed: IDs + status/dates)
                         │
                         ▼
                   evaluation/ ── frozen splits + OpenRouter baselines ──► data/derived/evaluation/
+                        │
+                        ▼
+                      sft/ ── prepare flat JSONL + QLoRA (inherits splits) ──► data/derived/sft/
 ```
 
 Each stage should use **explicit paths** (config or CLI args).
@@ -104,6 +109,10 @@ aus-patent-data/
 │   ├── src/
 │   ├── config/
 │   └── README.md
+├── sft/                    # prepare flat SFT + QLoRA train (CUDA)
+│   ├── src/
+│   ├── config/
+│   └── README.md
 ├── methodologies/          # numbered method notes (01 generation, 02 validation, 03 eval)
 ├── data/
 │   ├── raw/                # base dumps + (later) raw API payloads
@@ -125,6 +134,7 @@ aus-patent-data/
 - Instruction generation: synthetic SFT JSONL (`instruction-generation/` → `data/derived/instruction_generation/{model_slug}/`).
 - Dataset validation: Mode 1 `scripts/validate_instruction_data.py`; Mode 2 sample judge `scripts/judge_instruction_data.py` → `data/derived/instruction_generation_validation/{model_slug}/`.
 - Eval: frozen splits `scripts/split_eval_data.py`; OpenRouter baselines `scripts/run_baselines.py`; scores `scripts/score_baselines.py` → `data/derived/evaluation/`.
+- SFT: prepare from splits `scripts/prepare_sft_data.py`; QLoRA `scripts/run_sft.py` → `data/derived/sft/` (GPU: `requirements-sft.txt`).
 
 ## Reproduction (partial)
 

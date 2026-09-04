@@ -13,9 +13,16 @@ Suggested order: freeze train/val/test splits from Mode 1 (+ optional Mode 2/3) 
 Runnable **baseline eval** (no training) lives in [`evaluation/`](../../evaluation/):
 
 ```bash
-.venv/bin/python scripts/split_eval_data.py --generator meta-llama/llama-3.3-70b-instruct
-.venv/bin/python scripts/run_baselines.py --all --generator meta-llama/llama-3.3-70b-instruct
-.venv/bin/python scripts/score_baselines.py --generator meta-llama/llama-3.3-70b-instruct
+.venv/bin/python scripts/split_eval_data.py --generator qwen/qwen3-235b-a22b-2507
+.venv/bin/python scripts/run_baselines.py --all --generator qwen/qwen3-235b-a22b-2507
+.venv/bin/python scripts/score_baselines.py --generator qwen/qwen3-235b-a22b-2507
 ```
 
-SFT / LoRA, PatentBERT, local HF generate, and LLM-as-a-judge on predictions are deferred; they should reuse the same frozen test IDs. See [`evaluation/README.md`](../../evaluation/README.md).
+Runnable **prepare + QLoRA SFT** lives in [`sft/`](../../sft/). It **inherits** the frozen `evaluation/splits/{generator_slug}/` membership (no new split logic; same temporal + `application_number` holdout as baselines). Flat datasets: `ipc_reasoning_full`, `ipc_reasoning_classification_only`, `abstract_drafting`, `mrc`. Default seed generator is `qwen/qwen3-235b-a22b-2507`.
+
+```bash
+.venv/bin/python scripts/prepare_sft_data.py --dataset all
+.venv/bin/python scripts/run_sft.py --dataset ipc_reasoning_full
+```
+
+Post-SFT generation/scoring, PatentBERT, and LLM-as-a-judge on predictions remain deferred; they should reuse the same frozen test IDs. See [`evaluation/README.md`](../../evaluation/README.md) and [`sft/README.md`](../../sft/README.md).

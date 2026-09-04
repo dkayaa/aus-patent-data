@@ -23,6 +23,8 @@ Compare fine-tuned students against each other and against baselines on a frozen
 
 ### IPC reasoning & classification
 
+For the **classification-only vs classification + justification** SFT contrast (label accuracy as the discovery metric), see the related-work note [`related_works/label-vs-rationale-sft.md`](../../related_works/label-vs-rationale-sft.md).
+
 | Metric | What it measures | Notes |
 |--------|------------------|--------|
 | **Exact IPC accuracy** | Predicted `Classification` code == gold `primary_ipc` (normalized) | Strict headline: requires the SFT two-line schema |

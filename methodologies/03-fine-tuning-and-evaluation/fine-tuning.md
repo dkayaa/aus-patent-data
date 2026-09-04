@@ -5,8 +5,9 @@
 Adapt one or more open-source instruction-capable LLMs on the validated Australian patent SFT corpus so they improve on the three seed tasks (IPC reasoning, abstract drafting, MRC) relative to their untuned base and to external baselines.
 
 ## Inputs
-* Train / validation rows from `data/derived/instruction_generation_validation/{model_slug}/<task>/passed/` (and any human-audited or judge-filtered subsets once frozen).
-* Alpaca-style fields: `instruction`, `input`, `output` (plus `task`, `application_number`, `meta` for stratification and leakage control).
+* Prepared flat JSONL from `scripts/prepare_sft_data.py` → `data/derived/sft/{generator_slug}/<dataset>/` (inherits frozen `evaluation/splits/` membership; do not re-split).
+* Source rows are Mode 1 `passed/` material already assigned by `scripts/split_eval_data.py` (global `application_number` across tasks; temporal test pool; seed 42).
+* Alpaca-style fields: `instruction`, `input`, `output` (plus `dataset` / `task`, `application_number`, `meta`).
 
 ## Student models (candidates)
 Prefer openly weights-available models that fit local or modest cloud GPU budgets, e.g.:
@@ -17,11 +18,16 @@ Document exact Hugging Face IDs, tokenizer, and chat template in the run config 
 
 ## Training modes
 
-### Per-task SFT
-Train a specialist checkpoint on one task’s JSONL. Best for isolating whether the data helps that capability; report three specialists when comparing task-wise.
+### Per-dataset SFT (implemented)
+Train a specialist adapter via `scripts/run_sft.py --dataset …` on one of:
+* `ipc_reasoning_full` — Classification + Justification
+* `ipc_reasoning_classification_only` — Classification line only (ablation)
+* `abstract_drafting` / `mrc` — pass-through gold / teacher Q–A
+
+Default stack: HF + PEFT QLoRA + TRL on CUDA (`sft/config/sft.yaml`; student default `meta-llama/Llama-3.1-8B-Instruct`). Train on train, validate on val, never fit on test.
 
 ### Multi-task SFT
-Pool all three tasks (stratified or proportional sampling). One checkpoint serves as the primary “patent instruction” model for the paper unless specialists clearly win.
+Pool datasets (stratified or proportional sampling). Out of scope for the current `sft/` runners; one checkpoint as a later ablation unless specialists clearly win.
 
 ### Parameter-efficient default
 Prefer **LoRA / QLoRA** adapters over full fine-tunes for reproducibility and cost:
@@ -36,11 +42,16 @@ Prefer **LoRA / QLoRA** adapters over full fine-tunes for reproducibility and co
 * **mrc:** short extractive answers; avoid length penalties that favor verbose drafting styles.
 
 ## Splits and leakage
-* Split by `application_number` (or patent family) so the same filing never appears in both train and test.
-* Stratify by task and, where possible, IPC section (IPC reasoning) / length buckets (abstract drafting).
-* Freeze split manifests under `data/derived/` (or later `data/processed/`) before any student training.
+* **Do not invent splits in `sft/`.** Reuse `evaluation/splits/{generator_slug}/` so the same `application_number` never appears in both train and test (assignment is global across IPC / abstract / MRC), and the temporal holdout matches baselines (`filedDate >=` YAML cutoff, currently `2024-01-01`, seed 42).
+* IPC-section stratification is desirable where possible but is **not** implemented in `evaluation/src/split.py` today; prepare does not add it.
+* Freeze split manifests before any student training; prepare copies seed/cutoff into each dataset `manifest.json` when present.
+* Use one `generator_slug` end-to-end for SFT vs baseline tables.
 
 ## Non-goals
 * Continued pretraining on raw patent dumps (domain CPT) unless added as a separate ablation.
 * RLHF / preference optimization in the first pass — SFT only unless human preference data is collected later.
 * Mixing scrape or classification pipelines into the trainer; this stage consumes frozen JSONL only.
+* Changing the eval temporal cutoff or adding IPC-section stratification inside `prepare_sft_data` (inherit `evaluation/` YAML / `split.py` as-is).
+
+## Runnable
+See [`sft/README.md`](../../sft/README.md): `scripts/prepare_sft_data.py`, `scripts/run_sft.py`, `requirements-sft.txt`.

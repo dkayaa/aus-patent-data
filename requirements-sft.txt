@@ -1,0 +1,13 @@
+# QLoRA SFT deps (DigitalOcean / CUDA). Install on the GPU machine:
+
+#   .venv/bin/pip install -r requirements-sft.txt
+# Install a CUDA build of torch that matches the droplet driver, e.g.:
+#   .venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cu124
+
+peft>=0.12.0
+trl>=0.9.0
+bitsandbytes>=0.43.0
+datasets>=2.19.0
+accelerate>=0.30.0
+transformers>=4.40
+PyYAML>=6.0

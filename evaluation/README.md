@@ -49,7 +49,8 @@ Two holds, both required:
 Undated apps cannot enter test (`n_missing_date` in the manifest). If the post-cutoff pool is under ~10% of unique apps, the whole pool is test; otherwise a 10% sample is drawn **from the pool only** (seed 42). Train/val is the remainder, 80/20. Test is never padded with older patents.
 
 ```bash
-.venv/bin/python scripts/split_eval_data.py --generator meta-llama/llama-3.3-70b-instruct
+# Primary seed generator (Mode 1 passed/): Qwen3-235B
+.venv/bin/python scripts/split_eval_data.py --generator qwen/qwen3-235b-a22b-2507
 ```
 
 ## Systems
@@ -74,7 +75,7 @@ Exemplars come from **train only**, one frozen list per task for every system. E
 
 ```bash
 export OPENROUTER_API_KEY='...'
-.venv/bin/python scripts/run_baselines.py --all --generator meta-llama/llama-3.3-70b-instruct
+.venv/bin/python scripts/run_baselines.py --all --generator qwen/qwen3-235b-a22b-2507
 # --prompting zeroshot|fewshot|all (default all)
 # --system qwen/qwen-2.5-7b-instruct --task mrc --limit 5
 ```
@@ -94,9 +95,13 @@ Reuses Mode 1 parsers, **not** Mode 1 pass/fail floors. Nomic is loaded once per
 Empty generation = fail.
 
 ```bash
-.venv/bin/python scripts/score_baselines.py --generator meta-llama/llama-3.3-70b-instruct
+.venv/bin/python scripts/score_baselines.py --generator qwen/qwen3-235b-a22b-2507
 ```
+
+## Downstream SFT
+
+QLoRA prepare/train lives in [`sft/`](../sft/). It inherits these frozen splits (no new membership). Same generator slug end-to-end for fair comparison with baselines.
 
 ## Deferred
 
-PatentBERT (IPC code-only classifier), local HF generate, LoRA/SFT, BERTScore/BLEU, LLM-as-a-judge on predictions. Same frozen test IDs later.
+PatentBERT (IPC code-only classifier), post-SFT generate + score, BERTScore/BLEU, LLM-as-a-judge on predictions. Same frozen test IDs later.
