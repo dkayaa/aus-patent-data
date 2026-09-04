@@ -46,7 +46,9 @@ PatentBERT-style baselines: report IPC/subclass accuracy only; mark generative m
 | **Semantic cosine** | Sentence embedding similarity vs gold abstract (and vs claims for faithfulness) | Align with Mode 1 pair definitions |
 | **Length / compression stats** | `|pred|`, `|pred|/|claims|` vs gold distribution | Detect verbosity collapse or copy-all |
 
-### Machine reading comprehension (MRC)
+### Machine reading comprehension (MRC) — retired
+
+MRC is **out of the active eval/SFT path**. Legacy metrics below remain for historical notes only; do not require new MRC generation for paper runs.
 
 | Metric | What it measures | Notes |
 |--------|------------------|--------|

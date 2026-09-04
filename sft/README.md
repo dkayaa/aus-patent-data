@@ -6,6 +6,8 @@ This stage does **not** invent train/val/test membership. It only transforms row
 
 **Default generator:** `qwen/qwen3-235b-a22b-2507` (`sft/config/sft.yaml`). Override with `--generator` when needed.
 
+**Active tasks:** IPC reasoning + abstract drafting. MRC is retired from eval/SFT (legacy holdings may remain on disk).
+
 ## Datasets (flat)
 
 | SFT dataset id | Reads eval split task | Transform |
@@ -13,7 +15,6 @@ This stage does **not** invent train/val/test membership. It only transforms row
 | `ipc_reasoning_full` | `ipc_reasoning` | `output` unchanged (Classification + Justification) |
 | `ipc_reasoning_classification_only` | `ipc_reasoning` | keep `Classification:` only; skip + count unparseable |
 | `abstract_drafting` | `abstract_drafting` | pass-through |
-| `mrc` | `mrc` | pass-through |
 
 Full claims stay in `input` as stored (no claim-1 truncation). One QLoRA run per `--dataset` (no pooled multi-task adapter in this stage).
 
@@ -47,7 +48,7 @@ data/derived/sft/runs/{run_name}/
 .venv/bin/python scripts/split_eval_data.py --generator qwen/qwen3-235b-a22b-2507
 .venv/bin/python scripts/prepare_sft_data.py --dataset all
 # defaults to qwen/qwen3-235b-a22b-2507; override with --generator …
-# --dataset ipc_reasoning_full|ipc_reasoning_classification_only|abstract_drafting|mrc
+# --dataset ipc_reasoning_full|ipc_reasoning_classification_only|abstract_drafting
 # --limit N   # caps train only; val/test unchanged
 ```
 
@@ -66,7 +67,6 @@ Install GPU stack on the droplet (keep root `requirements.txt` free of these pin
 .venv/bin/python scripts/run_sft.py --dataset ipc_reasoning_full
 .venv/bin/python scripts/run_sft.py --dataset ipc_reasoning_classification_only
 .venv/bin/python scripts/run_sft.py --dataset abstract_drafting
-.venv/bin/python scripts/run_sft.py --dataset mrc
 ```
 
 Trains on `train` + validates on `val`; never fits on `test`. Default student: `meta-llama/Llama-3.1-8B-Instruct` (`sft/config/sft.yaml`). Fails clearly without CUDA / bitsandbytes.

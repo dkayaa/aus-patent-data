@@ -26,7 +26,6 @@ decode:
   max_tokens:
     ipc_reasoning: 1024
     abstract_drafting: 1024
-    mrc: 256
   shard_size: 100
 
 semantic:

@@ -1,4 +1,7 @@
 # Task 3: Machine Reading Comprehension (Extractive QA)
+
+> **Retired** from the active eval / SFT pipeline. Do not generate new MRC for paper splits; code and legacy holdings may remain.
+
 ---
 
 ## Objective

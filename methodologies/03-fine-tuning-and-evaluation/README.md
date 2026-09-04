@@ -18,7 +18,7 @@ Runnable **baseline eval** (no training) lives in [`evaluation/`](../../evaluati
 .venv/bin/python scripts/score_baselines.py --generator qwen/qwen3-235b-a22b-2507
 ```
 
-Runnable **prepare + QLoRA SFT** lives in [`sft/`](../../sft/). It **inherits** the frozen `evaluation/splits/{generator_slug}/` membership (no new split logic; same temporal + `application_number` holdout as baselines). Flat datasets: `ipc_reasoning_full`, `ipc_reasoning_classification_only`, `abstract_drafting`, `mrc`. Default seed generator is `qwen/qwen3-235b-a22b-2507`.
+Runnable **prepare + QLoRA SFT** lives in [`sft/`](../../sft/). It **inherits** the frozen `evaluation/splits/{generator_slug}/` membership (no new split logic; same temporal + `application_number` holdout as baselines). Flat datasets: `ipc_reasoning_full`, `ipc_reasoning_classification_only`, `abstract_drafting`. Default seed generator is `qwen/qwen3-235b-a22b-2507`. MRC is retired from eval/SFT.
 
 ```bash
 .venv/bin/python scripts/prepare_sft_data.py --dataset all

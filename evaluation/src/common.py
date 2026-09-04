@@ -20,7 +20,8 @@ for extra in (IG_SRC, DV_SRC, SCRAPE_SRC):
     if str(extra) not in sys.path:
         sys.path.insert(0, str(extra))
 
-TASKS = ("abstract_drafting", "ipc_reasoning", "mrc")
+# MRC is retired from the active eval/SFT path (legacy holdings may still exist).
+TASKS = ("abstract_drafting", "ipc_reasoning")
 PROMPTINGS = ("zeroshot", "fewshot_k3")
 DEFAULT_CONFIG = REPO_ROOT / "evaluation" / "config" / "baselines.yaml"
 

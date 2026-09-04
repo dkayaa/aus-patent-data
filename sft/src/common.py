@@ -30,7 +30,6 @@ SFT_DATASETS = (
     "ipc_reasoning_full",
     "ipc_reasoning_classification_only",
     "abstract_drafting",
-    "mrc",
 )
 
 # SFT dataset id → eval split task folder name.
@@ -38,7 +37,6 @@ DATASET_TO_SPLIT_TASK: dict[str, str] = {
     "ipc_reasoning_full": "ipc_reasoning",
     "ipc_reasoning_classification_only": "ipc_reasoning",
     "abstract_drafting": "abstract_drafting",
-    "mrc": "mrc",
 }
 
 SPLITS = ("train", "val", "test")

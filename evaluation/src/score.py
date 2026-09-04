@@ -351,7 +351,11 @@ def main(argv: list[str] | None = None) -> int:
                 elif task_id == "abstract_drafting":
                     report = score_abstract(rows, scorer)
                 else:
-                    report = score_mrc(rows)
+                    print(
+                        f"[{sys_slug} {prompting} {task_id}] unknown task; skip",
+                        flush=True,
+                    )
+                    continue
                 report.update(
                     {
                         "system": sys_slug,
