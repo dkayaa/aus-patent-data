@@ -36,19 +36,20 @@ Ground the mapping in concrete claim features (parts, steps, materials), not the
 Respond with the justification only, as free prose: no Classification line, headings, or bullet list. Do not follow a fixed outline. Opening, sentence count, and order may vary from example to example."""
 
 # Instruction diversification (same pattern as abstract drafting pools).
-# Pool wordings must match the teacher target: one paragraph, claim→definition
-# mapping, no re-classification, no multi-section examiner memos.
+# Student-facing task: assign an IPC code and justify it from abstract+claims.
+# (Teacher generation still treats the office code as gold; that is separate.)
 INSTRUCTION_POOL_PROMPT = (
     "I am building an instruction-tuning dataset for patent IPC classification "
     "reasoning. Generate 5 diverse, professional instructions that ask a model to "
-    "write a short paragraph justifying an already-assigned "
-    "IPC code by mapping claim features to that classification place. "
+    "assign an IPC code to a patent and write a short paragraph justifying that "
+    "code by mapping claim features to the classification place. "
     "Vary length, tone, and framing (examiner note, attorney file note, brief "
-    "rationale, classification log). All variants must: treat the assigned code as "
-    "given (do not ask to re-classify, pick a better code, or discuss adjacent "
-    "places); ask for claim-feature to definition mapping; and must NOT request "
-    "multi-section memoranda, hierarchical walk-downs, confidence scores, or "
-    "labeled subsections. Do not mention specific IPC codes or invent patent facts. "
+    "rationale, classification log). All variants must: ask the model to both "
+    "select/assign an IPC symbol and justify it; ask for claim-feature to "
+    "definition mapping in the justification; and must NOT request "
+    "multi-section memoranda, hierarchical walk-downs, confidence scores, "
+    "labeled subsections, or comparisons of multiple alternative codes. "
+    "Do not mention specific IPC codes or invent patent facts. "
     "Output only a JSON list of strings."
 )
 
