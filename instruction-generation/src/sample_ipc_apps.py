@@ -71,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--name",
-        default="ipc_reasoning_10k_cap1pct",
+        default="ipc_reasoning_10k_cap0_5pct",
         help="Basename for output files",
     )
     return p

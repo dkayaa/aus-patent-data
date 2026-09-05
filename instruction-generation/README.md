@@ -61,7 +61,7 @@ export OPENROUTER_API_KEY='...'
 .venv/bin/python scripts/sample_ipc_apps.py --target 10000 --max-per-symbol-frac 0.005
 .venv/bin/python scripts/generate_instruction_data.py --task ipc_reasoning \
   --provider openrouter --model qwen/qwen3-235b-a22b-2507 --workers 12 --temperature 0.0 \
-  --only-ids data/derived/instruction_generation/_samples/ipc_reasoning_10k_cap1pct.txt \
+  --only-ids data/derived/instruction_generation/_samples/ipc_reasoning_10k_cap0_5pct.txt \
   --limit 10000
 ```
 Instruction pools (diversified phrasings for a fixed task) are generated once per task and cached under `data/derived/instruction_generation/_pools/`. Reused across generators so smoke tests are comparable. Rebuild one task's pool with `--rebuild-pool` (requires `--task`; overwrites `_pools/<task>.json`). See `methodologies/01-instruction-data-generation/` for the full workflow.
