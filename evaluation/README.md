@@ -6,7 +6,7 @@ This stage does **not** scrape IP Australia, generate SFT gold, run Mode 1/2 val
 
 ## What it measures
 
-Paired baselines on a frozen test set: a small instruct student, Llama 3.1 8B, the Llama 3.3 70B teacher, and GPT-4o, each with and without 3 in-context examples. Later SFT should reuse the same test `application_number`s.
+Paired baselines on a frozen test set: Qwen3-8B (student), the Qwen3-235B-A22B-2507 teacher, and Claude Sonnet 4.6, each with and without 3 in-context examples. Later SFT should reuse the same test `application_number`s.
 
 **How to read scores**
 
@@ -59,12 +59,11 @@ Temperature **0**. Default `--workers 12`. Reuses `instruction-generation/src/ll
 
 | Role | OpenRouter model |
 |------|------------------|
-| Student A | `qwen/qwen-2.5-7b-instruct` |
-| Student B | `meta-llama/llama-3.1-8b-instruct` |
-| Teacher | `meta-llama/llama-3.3-70b-instruct` |
-| Frontier | `openai/gpt-4o` |
+| Student | `qwen/qwen3-8b` |
+| Teacher | `qwen/qwen3-235b-a22b-2507` |
+| Frontier | `anthropic/claude-sonnet-4.6` |
 
-Each system × two regimes on the **same test IDs** (8 jobs):
+Each system × two regimes on the **same test IDs** (6 jobs):
 
 | Regime | Prompt |
 |--------|--------|
@@ -77,7 +76,7 @@ Exemplars come from **train only**, one frozen list per task for every system. E
 export OPENROUTER_API_KEY='...'
 .venv/bin/python scripts/run_baselines.py --all --generator qwen/qwen3-235b-a22b-2507
 # --prompting zeroshot|fewshot|all (default all)
-# --system qwen/qwen-2.5-7b-instruct --task abstract_drafting --limit 5
+# --system qwen/qwen3-8b --task abstract_drafting --limit 5
 ```
 
 Resume via `done_ids.txt` under each prediction dir. `max_tokens`: 1024 for IPC and abstract.

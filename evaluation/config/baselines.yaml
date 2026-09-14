@@ -37,15 +37,12 @@ semantic:
   prefix_b: "search_document: "
 
 systems:
-  - id: qwen-2.5-7b-instruct
+  - id: qwen3-8b
     role: student
-    model: qwen/qwen-2.5-7b-instruct
-  - id: llama-3.1-8b-instruct
-    role: student
-    model: meta-llama/llama-3.1-8b-instruct
-  - id: llama-3.3-70b-instruct
+    model: qwen/qwen3-8b
+  - id: qwen3-235b-a22b-2507
     role: teacher
-    model: meta-llama/llama-3.3-70b-instruct
-  - id: gpt-4o
+    model: qwen/qwen3-235b-a22b-2507
+  - id: claude-sonnet-4.6
     role: frontier
-    model: openai/gpt-4o
+    model: anthropic/claude-sonnet-4.6
