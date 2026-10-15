@@ -134,6 +134,7 @@ class IPCAccessorTests(unittest.TestCase):
         parents = self.accessor.get_parent("A01B1/10")
         self.assertEqual(len(parents), 1)
         self.assertEqual(parents[0].node_id, "A01B1/02")
+        self.assertEqual(self.accessor.get("A01B1/10").title, "with two blades")
         self.assertEqual(parents[0].title, "Spades")
         self.assertEqual(parents[0].definition, "Spade definition.")
         self.assertEqual(parents[0].kind, "1")

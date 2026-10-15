@@ -189,6 +189,14 @@ class IPCAccessor:
         )
         self._ready = True
 
+    def get(self, node_id: str) -> IPCNode:
+        """The place itself."""
+        self._require_init()
+        key = self._resolve(node_id)
+        if key not in self._nodes:
+            raise KeyError(node_id)
+        return self._nodes[key]
+
     def get_children(self, node_id: str) -> list[IPCNode]:
         """Immediate child places in scheme order."""
         self._require_init()

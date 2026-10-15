@@ -65,6 +65,16 @@ def _resolve(path: Path) -> Path:
     return path if path.is_absolute() else (REPO_ROOT / path)
 
 
+def _task_needs_llm(task_id: str, cfg: dict[str, Any]) -> bool:
+    options = (cfg.get("tasks") or {}).get(task_id) or {}
+    if not isinstance(options, dict):
+        options = {}
+    requires = getattr(TASKS[task_id], "requires_llm", None)
+    if callable(requires):
+        return bool(requires(options))
+    return bool(TASKS[task_id].needs_llm)
+
+
 def load_config(path: Path) -> dict[str, Any]:
     with path.open(encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
@@ -173,11 +183,21 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _try_generate(task: Any, patent: Any) -> tuple[Any, dict[str, Any] | None, BaseException | None]:
+def _try_generate(
+    task: Any, patent: Any
+) -> tuple[Any, dict[str, Any] | list[dict[str, Any]] | None, BaseException | None]:
     try:
         return patent, task.generate(patent), None
     except Exception as exc:  # noqa: BLE001 — continue batch on per-patent failures
         return patent, None, exc
+
+
+def _coerce_records(record: Any) -> list[dict[str, Any]]:
+    if record is None:
+        return []
+    if isinstance(record, list):
+        return [item for item in record if item is not None]
+    return [record]
 
 
 def _write_ok(
@@ -246,12 +266,14 @@ def run_task(
     workers = max(1, int(workers))
 
     task_cls = TASKS[task_id]
+    task_options = (cfg.get("tasks") or {}).get(task_id) or {}
     task = task_cls(
         client,
         ipc_lookup=ipc_lookup,
         evol_cfg=evol_cfg,
         pools_dir=pools,
         prompt_budget=prompt_budget,
+        options=task_options if isinstance(task_options, dict) else {},
     )
     print(f"[{task_id}] setup…", flush=True)
     task.setup()
@@ -336,20 +358,24 @@ def _run_serial(
                 flush=True,
             )
             continue
-        if record is None:
+        records = _coerce_records(record)
+        if not records:
             n_skip += 1
             continue
-        if (record.get("meta") or {}).get("claims_trimmed"):
-            n_trimmed += 1
-        n_ok = _write_ok(
-            task_id=task_id,
-            task_dir=task_dir,
-            writer=writer,
-            patent=patent,
-            record=record,
-            n_ok=n_ok,
-            append_done=append_done,
-        )
+        for rec in records:
+            if (rec.get("meta") or {}).get("claims_trimmed"):
+                n_trimmed += 1
+            n_ok = _write_ok(
+                task_id=task_id,
+                task_dir=task_dir,
+                writer=writer,
+                patent=patent,
+                record=rec,
+                n_ok=n_ok,
+                append_done=False,
+            )
+        if append_done:
+            append_done_id(task_dir, patent.application_number)
     return n_ok, n_skip, n_err, n_oversized, n_trimmed
 
 
@@ -370,7 +396,10 @@ def _run_parallel(
     n_oversized = 0
     n_trimmed = 0
     exhausted = False
-    inflight: dict[Future[tuple[Any, dict[str, Any] | None, BaseException | None]], Any] = {}
+    inflight: dict[
+        Future[tuple[Any, dict[str, Any] | list[dict[str, Any]] | None, BaseException | None]],
+        Any,
+    ] = {}
     # Keep the pool fed. IPC skips locally; eligible() already dropped those.
     target_inflight = workers * 3
 
@@ -432,22 +461,26 @@ def _run_parallel(
                         flush=True,
                     )
                     continue
-                if record is None:
+                records = _coerce_records(record)
+                if not records:
                     n_skip += 1
                     continue
                 if limit is not None and n_ok >= limit:
                     continue
-                if (record.get("meta") or {}).get("claims_trimmed"):
-                    n_trimmed += 1
-                n_ok = _write_ok(
-                    task_id=task_id,
-                    task_dir=task_dir,
-                    writer=writer,
-                    patent=patent,
-                    record=record,
-                    n_ok=n_ok,
-                    append_done=append_done,
-                )
+                for rec in records:
+                    if (rec.get("meta") or {}).get("claims_trimmed"):
+                        n_trimmed += 1
+                    n_ok = _write_ok(
+                        task_id=task_id,
+                        task_dir=task_dir,
+                        writer=writer,
+                        patent=patent,
+                        record=rec,
+                        n_ok=n_ok,
+                        append_done=False,
+                    )
+                if append_done:
+                    append_done_id(task_dir, patent.application_number)
     return n_ok, n_skip, n_err, n_oversized, n_trimmed
 
 
@@ -552,11 +585,20 @@ def main(argv: list[str] | None = None) -> int:
         flush=True,
     )
 
-    # Preload tokenizer once (documented HF stand-in for llama3.1:8b).
-    get_tokenizer(budget.tokenizer_id)
+    task_ids = sorted(TASKS.keys()) if args.all else [args.task]
+    needs_llm = any(_task_needs_llm(task_id, cfg) for task_id in task_ids)
 
+    # Preload tokenizer once (documented HF stand-in for llama3.1:8b).
     asserted_num_ctx: int | None = None
-    if llm_cfg.provider == "local":
+    if needs_llm:
+        get_tokenizer(budget.tokenizer_id)
+    else:
+        print(
+            "Task does not call the teacher; skipping tokenizer load and Ollama warmup.",
+            flush=True,
+        )
+
+    if needs_llm and llm_cfg.provider == "local":
         def _warmup() -> None:
             client.chat(
                 [{"role": "user", "content": "ping"}],
@@ -597,7 +639,6 @@ def main(argv: list[str] | None = None) -> int:
     workers = max(1, int(workers or 1))
     print(f"Workers: {workers}", flush=True)
 
-    task_ids = sorted(TASKS.keys()) if args.all else [args.task]
     all_stats = []
     for task_id in task_ids:
         stats = run_task(

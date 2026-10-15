@@ -37,6 +37,16 @@ evol_instruct:
   # Batches of instructions requested per LLM call when filling the pool.
   batch_size: 5
 
+tasks:
+  ipc_lcpn:
+    # Include the patent abstract in every hop. Set false to omit it.
+    include_abstract: true
+    # claim_1 = independent claim 1 only. omit = no claims text.
+    claims: claim_1
+    # Teacher writes a short justification, then Classification: <symbol>.
+    # Set false to store the symbol only and skip the teacher call.
+    justify: true
+
 run:
   # Records per output shard part-NNNNN.jsonl.gz
   shard_size: 100
