@@ -1,0 +1,38 @@
+# Student/Final model IPC LCPN runner settings
+
+# These can be configured to any value required.
+stop_token: STOP
+root_label: ROOT
+
+# Patent fields to include in each hop
+include_abstract: true
+claims: claim_1   # claim_1 | omit
+justify: true
+
+# Max hops (safety). Assuming IPC has an order of 13 steps:
+# (section → class → subclass → main group → up to 9-dot subgroup)
+# max path length acc to IPCAccessor = 13
+max_hops: 16
+
+llm:
+  # local = Ollama | openrouter = paid API | hf = fine-tuned student
+  provider: local
+  model: llama3.1:8b
+  base_url: http://127.0.0.1:11434/v1
+  api_key_env: OPENAI_API_KEY
+  temperature: 0.0
+  max_tokens: 512
+  max_output_tokens: 512
+  num_ctx: 8192
+  timeout_s: 120
+  max_retries: 3
+
+# Only used when llm.provider is hf
+hf:
+  model: meta-llama/Llama-3.1-8B-Instruct
+  adapter_path: null   # set to a folder under data/derived/sft/runs/ after training
+  max_new_tokens: 512
+  temperature: 0.0
+
+paths:
+  output_dir: data/derived/ipc_lcpn
