@@ -14,6 +14,9 @@ from prompt_fit import PromptBudget
 
 class Task(ABC):
     task_id: str
+    # False for tasks that materialise records from the patent and the scheme
+    # without calling the teacher model.
+    needs_llm: bool = True
 
     def __init__(
         self,
@@ -23,12 +26,14 @@ class Task(ABC):
         evol_cfg: dict[str, Any] | None = None,
         pools_dir: Any | None = None,
         prompt_budget: PromptBudget | None = None,
+        options: dict[str, Any] | None = None,
     ) -> None:
         self.client = client
         self.ipc_lookup = ipc_lookup
         self.evol_cfg = evol_cfg or {}
         self.pools_dir = pools_dir
         self.prompt_budget = prompt_budget
+        self.options = options or {}
 
     def setup(self) -> None:
         """Optional one-time setup (e.g. Evol-Instruct instruction pool)."""
@@ -38,8 +43,10 @@ class Task(ABC):
         return True
 
     @abstractmethod
-    def generate(self, patent: PatentText) -> dict[str, Any] | None:
-        """Return an Alpaca-style record, or None to skip."""
+    def generate(
+        self, patent: PatentText
+    ) -> dict[str, Any] | list[dict[str, Any]] | None:
+        """Return one record, several records, or None to skip."""
 
     def _meta(self, patent: PatentText, **extra: Any) -> dict[str, Any]:
         meta = {

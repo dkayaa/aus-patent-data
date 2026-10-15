@@ -22,6 +22,7 @@ Alpaca-style records: `task`, `application_number`, `instruction`, `input`, `out
 | `--task` | Method |
 |----------|--------|
 | `ipc_reasoning` | Instruction pool + LLM justification of `primary_ipc` (skip if no WIPO definition) |
+| `ipc_lcpn` | One multiple-choice hop per edge on the path to `primary_ipc`. By default the teacher writes a short justification before `Classification: <symbol>`. Abstract, claim 1, and `justify` are under `tasks.ipc_lcpn` |
 | `abstract_drafting` | Instruction pool; claims → official abstract |
 | `mrc` | *(retired from eval/SFT)* Instruction pool + LLM extractive Q/A; keep only for legacy holdings |
 
