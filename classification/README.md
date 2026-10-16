@@ -77,11 +77,48 @@ python scripts/run_patentbert.py --prepare-only
 python scripts/run_patentbert.py --prepare-only --gzip
 ```
 
+## IPC LCPN (step-by-step IPC classification)
+
+This is the **eventual final model** path: the **fine-tuned student** classifying a patent by walking the IPC tree.
+
+How it works:
+
+1. Start at the top of the tree.
+2. Show the model the patent text and the list of child IPC codes at the current place.
+3. The model picks one child, or says `STOP` if none fit.
+4. Move to that child and repeat until `STOP` or there are no children left.
+5. Print the path of codes it chose.
+
+Code lives in `src/ipc_lcpn/`. Settings live in `config/ipc_lcpn.yaml`. The IPC tree comes from the top-level `ipc/` package. The prompt format matches the `ipc_lcpn` training task in `instruction-generation/`.
+
+Which model to call is set in the YAML under `llm.provider`:
+
+- `local` — your machine (e.g. Ollama). Default. Good for a free quick test.
+- `openrouter` — cloud API (needs an API key).
+- `hf` — load the Hugging Face student model (same stack as `sft/`), optionally with a trained adapter path.
+
+Run one patent from the command line:
+
+```bash
+.venv/bin/python scripts/run_ipc_lcpn.py \
+  --abstract "A hand tool for digging soil." \
+  --claim-1 "A spade comprising a blade and a handle."
+```
+
+Optional: add `--json-out some_file.json` to save the full step-by-step trace.
+
+Tests:
+
+```bash
+.venv/bin/python -m unittest classification.tests.test_ipc_lcpn -v
+```
+
 ## Inputs / outputs
 
 - **Reads:** enriched tables from `data/raw/` and/or `data/derived/` (after scrape), plus the base application dump as needed
 - **Writes:** `data/derived/`, `data/processed/`
+- **IPC LCPN runner:** takes abstract / claim text on the CLI; can write a JSON trace with `--json-out`
 
 ## How to run
 
-See PatentBERT section above. Other classifiers TBD.
+See the PatentBERT and IPC LCPN sections above.

@@ -53,6 +53,7 @@ Work is organized by **pipeline stage**, not by language or framework:
 | Frozen test splits and OpenRouter baselines | `evaluation/src/`, config in `evaluation/config/` |
 | Prepare SFT JSONL / QLoRA train | `sft/src/`, config in `sft/config/` (`requirements-sft.txt` on GPU) |
 | Writing pipeline glue / one-shot runners | `scripts/` |
+| Shared IPC scheme tree | `ipc/` (`IPCAccessor`) |
 | Changing project-wide deps | root `pyproject.toml` / `requirements.txt` (when added) |
 
 ### Expected data flow
@@ -113,6 +114,7 @@ aus-patent-data/
 │   ├── src/
 │   ├── config/
 │   └── README.md
+├── ipc/                    # WIPO IPC scheme tree (IPCAccessor)
 ├── methodologies/          # numbered method notes (01 generation, 02 validation, 03 eval)
 ├── data/
 │   ├── raw/                # base dumps + (later) raw API payloads
