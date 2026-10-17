@@ -255,6 +255,7 @@ class IPCLCPNTask(Task):
                     claims=claims_mode,
                     justify=justify,
                     stop_token=stop_token,
+                    filed_date=patent.filed_date or None,
                     **extra,
                 )
             )

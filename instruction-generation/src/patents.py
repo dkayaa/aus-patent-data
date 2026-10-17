@@ -32,6 +32,7 @@ class PatentText:
     claims_text: str
     claim_1: str
     document_type: str
+    filed_date: str = ""
 
 
 def select_primary_document(docs: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -87,6 +88,7 @@ def extract_patent_text(record: dict[str, Any]) -> PatentText | None:
         claims_text=join_claims(claims),
         claim_1=claims[0],
         document_type=str(primary.get("documentTypeCode") or ""),
+        filed_date=str(record.get("filedDate") or "").strip(),
     )
 
 

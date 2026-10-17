@@ -64,6 +64,7 @@ def _patent(**overrides: str) -> PatentText:
         "claims_text": "CLAIM_ONE\n\nCLAIM_TWO",
         "claim_1": "CLAIM_ONE",
         "document_type": "A1",
+        "filed_date": "2020-03-15",
     }
     fields.update(overrides)
     return PatentText(**fields)  # type: ignore[arg-type]
@@ -113,6 +114,8 @@ class IPCLCPNTests(unittest.TestCase):
         )
         self.assertNotIn("A01C", menu)
         self.assertEqual(records[0]["meta"]["stop_token"], "STOP")
+        self.assertEqual(records[0]["meta"]["filed_date"], "2020-03-15")
+        self.assertEqual(records[-1]["meta"]["filed_date"], "2020-03-15")
         self.assertIn("or STOP if none of the children fit", records[0]["instruction"])
 
     def test_stop_token_is_configurable(self) -> None:
