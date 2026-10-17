@@ -15,6 +15,7 @@ symbol only and the teacher is not called.
 - ``include_abstract`` (default true): omit the abstract when false
 - ``claims``: ``claim_1`` (default) or ``omit``
 - ``justify`` (default true): teacher justification before the symbol
+- ``stop_token`` (default ``STOP``): last menu option; gold is still the next place
 """
 
 from __future__ import annotations
@@ -40,16 +41,24 @@ if str(_IPC_ROOT) not in sys.path:
 
 from ipc.accessor import IPCAccessor, IPCNode  # noqa: E402
 
-INSTRUCTION_LABEL = (
-    "Select the IPC symbol that correctly continues the classification "
-    "from the current place. Answer with the symbol only."
-)
+def _instruction_label(stop_token: str) -> str:
+    return (
+        "Select the IPC symbol that correctly continues the classification "
+        "from the current place, or "
+        f"{stop_token} if none of the children fit. "
+        f"Answer with the symbol or {stop_token} only."
+    )
 
-INSTRUCTION_JUSTIFY = (
-    "Select the IPC symbol that correctly continues the classification "
-    "from the current place. Write a short justification grounded in the "
-    "patent text, then a line of the form Classification: <symbol>."
-)
+
+def _instruction_justify(stop_token: str) -> str:
+    return (
+        "Select the IPC symbol that correctly continues the classification "
+        "from the current place, or "
+        f"{stop_token} if none of the children fit. "
+        "Write a short justification grounded in the patent text, then a line "
+        f"of the form Classification: <symbol_or_{stop_token}>."
+    )
+
 
 TEACHER_SYSTEM = "You are an expert Australian Patent Examiner."
 
@@ -115,11 +124,16 @@ def _title_path(nodes: list[IPCNode]) -> str:
     return " > ".join(parts)
 
 
-def _choice_lines(children: list[IPCNode]) -> str:
-    return "\n".join(
+def _choice_lines(children: list[IPCNode], *, stop_token: str) -> str:
+    lines = [
         f"{index}. {child.node_id} - {child.title}"
         for index, child in enumerate(children, start=1)
+    ]
+    lines.append(
+        f"{len(children) + 1}. {stop_token} - none of these children; "
+        "remain at the current place"
     )
+    return "\n".join(lines)
 
 
 def _as_bool(value: Any, default: bool) -> bool:
@@ -195,12 +209,13 @@ class IPCLCPNTask(Task):
         claims_mode = self._claims_mode()
         include_abstract = self._include_abstract()
         justify = self._justify()
+        stop_token = self._stop_token()
         records: list[dict[str, Any]] = []
         n_hops = len(hops)
         for index, (now, gold, children) in enumerate(hops):
             ancestors = path[: index + 1]
             titles = _title_path(ancestors)
-            choice_lines = _choice_lines(children)
+            choice_lines = _choice_lines(children, stop_token=stop_token)
             blocks: list[str] = []
             if document:
                 blocks.append(document)
@@ -217,10 +232,10 @@ class IPCLCPNTask(Task):
                     choice_lines=choice_lines,
                 )
                 output_text = f"{justification}\nClassification: {gold.node_id}"
-                instruction = INSTRUCTION_JUSTIFY
+                instruction = _instruction_justify(stop_token)
             else:
                 output_text = gold.node_id
-                instruction = INSTRUCTION_LABEL
+                instruction = _instruction_label(stop_token)
             extra: dict[str, Any] = {}
             if fitted is not None:
                 extra.update(self._fit_meta(fitted))
@@ -239,6 +254,7 @@ class IPCLCPNTask(Task):
                     include_abstract=include_abstract,
                     claims=claims_mode,
                     justify=justify,
+                    stop_token=stop_token,
                     **extra,
                 )
             )
@@ -315,6 +331,12 @@ class IPCLCPNTask(Task):
 
     def _justify(self) -> bool:
         return _as_bool(self.options.get("justify"), True)
+
+    def _stop_token(self) -> str:
+        token = str(self.options.get("stop_token") or "STOP").strip()
+        if not token:
+            raise ValueError("tasks.ipc_lcpn.stop_token must be a non-empty string")
+        return token
 
     def _claims_mode(self) -> str:
         mode = str(self.options.get("claims", _CLAIMS_CLAIM_1)).strip().lower()

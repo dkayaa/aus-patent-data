@@ -107,7 +107,24 @@ class IPCLCPNTests(unittest.TestCase):
         menu = records[2]["input"]
         self.assertIn("1. A01B1/00 - HAND", menu)
         self.assertIn("2. A01B3/00 - PLOUGHS", menu)
+        self.assertIn(
+            "3. STOP - none of these children; remain at the current place",
+            menu,
+        )
         self.assertNotIn("A01C", menu)
+        self.assertEqual(records[0]["meta"]["stop_token"], "STOP")
+        self.assertIn("or STOP if none of the children fit", records[0]["instruction"])
+
+    def test_stop_token_is_configurable(self) -> None:
+        records = self._task(stop_token="HALT").generate(_patent())
+        assert records is not None
+        self.assertIn(
+            "3. HALT - none of these children; remain at the current place",
+            records[2]["input"],
+        )
+        self.assertNotIn("STOP", records[2]["input"])
+        self.assertIn("or HALT only", records[0]["instruction"])
+        self.assertEqual(records[0]["output"], "A01")
 
     def test_abstract_and_claim_switches(self) -> None:
         both = self._task(include_abstract=True, claims="claim_1").generate(_patent())

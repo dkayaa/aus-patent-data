@@ -40,12 +40,14 @@ evol_instruct:
 tasks:
   ipc_lcpn:
     # Include the patent abstract in every hop. Set false to omit it.
-    include_abstract: true
+    include_abstract: false
     # claim_1 = independent claim 1 only. omit = no claims text.
     claims: claim_1
     # Teacher writes a short justification, then Classification: <symbol>.
     # Set false to store the symbol only and skip the teacher call.
-    justify: true
+    justify: false
+    # Last row of every child menu. Gold is still the next place on the path.
+    stop_token: STOP
 
 run:
   # Records per output shard part-NNNNN.jsonl.gz
