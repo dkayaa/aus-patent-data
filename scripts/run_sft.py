@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Thin runner: QLoRA SFT on a prepared flat dataset (CUDA)."""
+"""Thin runner: bf16 LoRA SFT on a prepared flat dataset (CUDA)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,5 @@
-# QLoRA SFT on frozen eval splits (DigitalOcean / CUDA).
+# bf16 LoRA SFT on frozen eval splits (DigitalOcean / CUDA).
+# Base weights stay in bf16. Only the adapter is trained.
 
 # Seed / teacher holdings used for splits + prepared JSONL (Mode 1 passed/).
 # Override with --generator when comparing another teacher.
@@ -26,14 +27,9 @@ train:
   eval_strategy: steps
   eval_steps: 200
   bf16: true
+  gradient_checkpointing: true
   packing: false
   seed: 42
-
-qlora:
-  load_in_4bit: true
-  bnb_4bit_quant_type: nf4
-  bnb_4bit_compute_dtype: bfloat16
-  bnb_4bit_use_double_quant: true
 
 lora:
   r: 16

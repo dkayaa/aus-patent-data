@@ -1,1 +1,1 @@
-"""SFT stage: prepare frozen-split JSONL and QLoRA train."""
+"""SFT stage: prepare frozen-split JSONL and bf16 LoRA train."""

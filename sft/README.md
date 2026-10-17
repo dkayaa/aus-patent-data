@@ -1,6 +1,6 @@
 # sft
 
-Prepare flat SFT datasets from **frozen** evaluation splits, then run per-dataset QLoRA (TRL / PEFT) on CUDA.
+Prepare flat SFT datasets from **frozen** evaluation splits, then run per-dataset bf16 LoRA (TRL / PEFT) on CUDA.
 
 This stage does **not** invent train/val/test membership. It only transforms rows already assigned by `scripts/split_eval_data.py` / `evaluation/src/split.py` (global `application_number` holdout, temporal test pool, seed 42). Use the same `generator_slug` end-to-end as baselines so SFT and baseline tables share test apps.
 
@@ -16,7 +16,7 @@ This stage does **not** invent train/val/test membership. It only transforms row
 | `ipc_reasoning_classification_only` | `ipc_reasoning` | keep `Classification:` only; skip + count unparseable |
 | `abstract_drafting` | `abstract_drafting` | pass-through |
 
-Full claims stay in `input` as stored (no claim-1 truncation). One QLoRA run per `--dataset` (no pooled multi-task adapter in this stage).
+Full claims stay in `input` as stored (no claim-1 truncation). One LoRA run per `--dataset` (no pooled multi-task adapter in this stage). The base model stays in bf16; only the adapter is trained.
 
 ## Layout
 
@@ -69,7 +69,7 @@ Install GPU stack on the droplet (keep root `requirements.txt` free of these pin
 .venv/bin/python scripts/run_sft.py --dataset abstract_drafting
 ```
 
-Trains on `train` + validates on `val`; never fits on `test`. Default student: `meta-llama/Llama-3.1-8B-Instruct` (`sft/config/sft.yaml`). Fails clearly without CUDA / bitsandbytes.
+Trains on `train` + validates on `val`; never fits on `test`. Default student: `meta-llama/Llama-3.1-8B-Instruct` (`sft/config/sft.yaml`). Fails clearly without CUDA. An 80 GB GPU is enough for an 8B model in bf16.
 
 ## Split alignment
 

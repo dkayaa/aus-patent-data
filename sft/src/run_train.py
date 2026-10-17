@@ -1,4 +1,4 @@
-"""QLoRA SFT via TRL / PEFT (CUDA). Trains on train+val only; never fits on test."""
+"""bf16 LoRA SFT via TRL / PEFT (CUDA). Trains on train+val only; never fits on test."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def _require_cuda() -> None:
     if not torch.cuda.is_available():
         raise SystemExit(
             "error: CUDA is not available. run_sft.py targets DigitalOcean / NVIDIA "
-            "GPUs (QLoRA + bitsandbytes). Use a GPU droplet, or prepare data only "
+            "GPUs (bf16 LoRA). Use a GPU droplet, or prepare data only "
             "with scripts/prepare_sft_data.py on CPU."
         )
 
@@ -49,20 +49,9 @@ def _maybe_limit(rows: list[dict[str, Any]], limit: int | None) -> list[dict[str
     return rows[:limit]
 
 
-def _dtype_from_name(name: str) -> Any:
-    import torch
-
-    key = (name or "bfloat16").lower()
-    if key in ("bf16", "bfloat16"):
-        return torch.bfloat16
-    if key in ("fp16", "float16"):
-        return torch.float16
-    return torch.float32
-
-
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="QLoRA SFT on a prepared flat dataset (train/val only)."
+        description="bf16 LoRA SFT on a prepared flat dataset (train/val only)."
     )
     p.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     p.add_argument(
@@ -111,7 +100,6 @@ def main(argv: list[str] | None = None) -> int:
     paths = cfg.get("paths") or {}
     model_cfg = cfg.get("model") or {}
     train_cfg = cfg.get("train") or {}
-    qlora_cfg = cfg.get("qlora") or {}
     lora_cfg = cfg.get("lora") or {}
     generator = (
         args.generator
@@ -177,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
     import torch
     from datasets import Dataset
     from peft import LoraConfig
-    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    from transformers import AutoModelForCausalLM, AutoTokenizer
     from trl import SFTConfig, SFTTrainer
 
     def to_text(row: dict[str, Any]) -> dict[str, str]:
@@ -203,17 +191,10 @@ def main(argv: list[str] | None = None) -> int:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    compute_dtype = _dtype_from_name(str(qlora_cfg.get("bnb_4bit_compute_dtype") or "bfloat16"))
-    bnb = BitsAndBytesConfig(
-        load_in_4bit=bool(qlora_cfg.get("load_in_4bit", True)),
-        bnb_4bit_quant_type=str(qlora_cfg.get("bnb_4bit_quant_type") or "nf4"),
-        bnb_4bit_compute_dtype=compute_dtype,
-        bnb_4bit_use_double_quant=bool(qlora_cfg.get("bnb_4bit_use_double_quant", True)),
-    )
+    use_bf16 = bool(train_cfg.get("bf16", True)) and torch.cuda.is_bf16_supported()
+    compute_dtype = torch.bfloat16 if use_bf16 else torch.float16
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        quantization_config=bnb,
-        device_map="auto",
         torch_dtype=compute_dtype,
     )
     model.config.use_cache = False
@@ -238,7 +219,6 @@ def main(argv: list[str] | None = None) -> int:
         task_type=str(lora_cfg.get("task_type") or "CAUSAL_LM"),
     )
 
-    use_bf16 = bool(train_cfg.get("bf16", True)) and torch.cuda.is_bf16_supported()
     sft_kwargs: dict[str, Any] = {
         "output_dir": str(out_dir),
         "num_train_epochs": epochs,
@@ -258,6 +238,7 @@ def main(argv: list[str] | None = None) -> int:
         "save_steps": int(train_cfg.get("save_steps") or 200),
         "bf16": use_bf16,
         "fp16": not use_bf16,
+        "gradient_checkpointing": bool(train_cfg.get("gradient_checkpointing", True)),
         "packing": bool(train_cfg.get("packing", False)),
         "seed": int(train_cfg.get("seed") or 42),
         "report_to": [],
@@ -319,7 +300,7 @@ def main(argv: list[str] | None = None) -> int:
         "train_path": str(train_path),
         "val_path": str(val_path) if val_path.is_file() else None,
         "output_dir": str(out_dir),
-        "qlora": qlora_cfg,
+        "torch_dtype": str(compute_dtype).replace("torch.", ""),
         "lora": {
             "r": peft_config.r,
             "lora_alpha": peft_config.lora_alpha,
