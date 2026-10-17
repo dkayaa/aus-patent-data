@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Freeze train/val/test splits and few-shot exemplars from Mode 1 passed/."""
+"""Freeze train/val/test splits from a task run's shards.
+
+Source shards live at ``data/derived/{task}/{run_name}/part-*.jsonl[.gz]``.
+The filing date is ``meta.filed_date``. Every row with the same application
+number is assigned to the same split.
+"""
 
 from __future__ import annotations
 
@@ -13,13 +18,10 @@ from typing import Any
 
 from common import (
     DEFAULT_CONFIG,
-    TASKS,
     load_config,
     resolve_path,
 )
-from holdings import resolve_generator_dir  # noqa: E402
 from io_local import iter_task_records, write_jsonl_gz
-from jsonl_gz import iter_jsonl_gz_shards, iter_records  # noqa: E402
 
 
 def parse_filed_date(raw: str) -> date | None:
@@ -32,23 +34,93 @@ def parse_filed_date(raw: str) -> date | None:
         return None
 
 
-def load_filed_dates(patents_dir: Path, needed: set[str]) -> dict[str, date | None]:
-    found: dict[str, date | None] = {}
-    remaining = set(needed)
-    if not remaining:
-        return found
-    for shard in iter_jsonl_gz_shards(patents_dir):
-        for rec in iter_records(shard):
-            app = str(rec.get("application_number") or "").strip()
-            if not app or app not in remaining:
-                continue
-            found[app] = parse_filed_date(str(rec.get("filedDate") or ""))
-            remaining.discard(app)
-            if not remaining:
-                return found
-    for app in remaining:
-        found[app] = None
-    return found
+def record_meta(record: dict[str, Any]) -> dict[str, Any]:
+    meta = record.get("meta")
+    return meta if isinstance(meta, dict) else {}
+
+
+def record_application_number(record: dict[str, Any]) -> str:
+    meta = record_meta(record)
+    return str(
+        meta.get("application_number") or record.get("application_number") or ""
+    ).strip()
+
+
+def record_filed_date(record: dict[str, Any]) -> date | None:
+    meta = record_meta(record)
+    raw = meta.get("filed_date")
+    if raw is None:
+        raw = meta.get("filedDate")
+    return parse_filed_date("" if raw is None else str(raw))
+
+
+def application_dates(
+    rows: list[dict[str, Any]],
+) -> tuple[dict[str, date | None], int, int]:
+    """One date per application number.
+
+    Returns ``(dates, n_missing_application, n_date_conflicts)``. A later row
+    can fill a missing date. A disagreeing date is counted and ignored so the
+    application still has a single split.
+    """
+    dates: dict[str, date | None] = {}
+    missing_app = 0
+    conflicts = 0
+    for record in rows:
+        app = record_application_number(record)
+        if not app:
+            missing_app += 1
+            continue
+        found = record_filed_date(record)
+        if app not in dates:
+            dates[app] = found
+            continue
+        current = dates[app]
+        if current is None and found is not None:
+            dates[app] = found
+        elif current is not None and found is not None and found != current:
+            conflicts += 1
+    return dates, missing_app, conflicts
+
+
+def assign_splits(
+    dates: dict[str, date | None],
+    *,
+    cutoff: date,
+    test_fraction: float,
+    train_val_ratio: float,
+    seed: int,
+) -> dict[str, str]:
+    """Assign each application number to train, val, or test.
+
+    Test is drawn only from filings on or after ``cutoff``. Undated filings
+    stay in the train/val remainder.
+    """
+    apps = set(dates)
+    test_pool = sorted(
+        app for app, filed in dates.items() if filed is not None and filed >= cutoff
+    )
+    rng = random.Random(seed)
+    n_all = len(apps)
+    n_target = max(1, int(round(test_fraction * n_all))) if n_all else 0
+    if len(test_pool) <= n_target:
+        test_ids = set(test_pool)
+    else:
+        test_ids = set(rng.sample(test_pool, n_target))
+    rest = sorted(app for app in apps if app not in test_ids)
+    rng.shuffle(rest)
+    n_train = int(round(train_val_ratio * len(rest)))
+    train_ids = set(rest[:n_train])
+    val_ids = set(rest[n_train:])
+
+    split_of: dict[str, str] = {}
+    for app in train_ids:
+        split_of[app] = "train"
+    for app in val_ids:
+        split_of[app] = "val"
+    for app in test_ids:
+        split_of[app] = "test"
+    return split_of
 
 
 def truncate_input(text: str, limit: int) -> str:
@@ -57,15 +129,25 @@ def truncate_input(text: str, limit: int) -> str:
     return text[: limit - 1].rstrip() + "…"
 
 
+def shard_dir(derived_root: Path, task: str, run_name: str) -> Path:
+    return derived_root / task / run_name
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Freeze eval train/val/test splits from Mode 1 passed rows."
+        description=(
+            "Freeze train/val/test splits from shards in "
+            "data/derived/{task}/{run_name}/."
+        )
     )
     p.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    p.add_argument("--task", required=True, help="Task folder under data/derived/")
+    p.add_argument("--run", required=True, help="Run folder under the task")
     p.add_argument(
-        "--generator",
+        "--input",
+        type=Path,
         default=None,
-        help="Generator model id or slug (required if several exist)",
+        help="Shard directory (default: data/derived/{task}/{run}/)",
     )
     return p
 
@@ -81,9 +163,23 @@ def main(argv: list[str] | None = None) -> int:
     split_cfg = cfg.get("split") or {}
     few_cfg = cfg.get("fewshot") or {}
 
-    passed_root = resolve_path(Path(paths.get("passed_root") or "data/derived/instruction_generation_validation"))
-    patents_dir = resolve_path(Path(paths.get("patents_dir") or "data/derived/patent_search_clean"))
+    task = str(args.task).strip()
+    run_name = str(args.run).strip()
+    if not task or not run_name:
+        print("error: --task and --run are required", file=sys.stderr)
+        return 1
+
+    derived_root = resolve_path(Path(paths.get("derived_root") or "data/derived"))
     output_root = resolve_path(Path(paths.get("output_root") or "data/derived/evaluation"))
+    source = (
+        resolve_path(args.input)
+        if args.input is not None
+        else shard_dir(derived_root, task, run_name)
+    )
+    if not source.is_dir():
+        print(f"error: shard dir missing: {source}", file=sys.stderr)
+        return 1
+
     seed = int(split_cfg.get("seed") or 42)
     cutoff = parse_filed_date(str(split_cfg.get("test_min_filed_date") or "2024-01-01"))
     if cutoff is None:
@@ -94,120 +190,91 @@ def main(argv: list[str] | None = None) -> int:
     k = int(few_cfg.get("k") or 3)
     exemplar_chars = int(few_cfg.get("exemplar_input_chars") or 4000)
 
-    try:
-        gen_dir = resolve_generator_dir(passed_root, generator=args.generator)
-    except (FileNotFoundError, ValueError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
-    gen_slug = gen_dir.name
-    print(f"Generator: {gen_slug}", flush=True)
-
-    by_task: dict[str, list[dict[str, Any]]] = {}
-    all_apps: set[str] = set()
-    for task_id in TASKS:
-        passed = gen_dir / task_id / "passed"
-        if not passed.is_dir():
-            print(f"error: Mode 1 passed dir missing: {passed}", file=sys.stderr)
-            return 1
-        rows = list(iter_task_records(passed))
-        by_task[task_id] = rows
-        for rec in rows:
-            app = str(rec.get("application_number") or "").strip()
-            if app:
-                all_apps.add(app)
-        print(f"[{task_id}] {len(rows)} Mode 1 passed", flush=True)
-
-    print(f"Loading filedDate from {patents_dir}…", flush=True)
-    dates = load_filed_dates(patents_dir, all_apps)
-    n_missing = sum(1 for app in all_apps if dates.get(app) is None)
-    test_pool = sorted(
-        app for app in all_apps if (dates.get(app) is not None and dates[app] >= cutoff)
+    rows = list(iter_task_records(source))
+    dates, n_missing_app, n_conflicts = application_dates(rows)
+    n_missing_date = sum(1 for filed in dates.values() if filed is None)
+    split_of = assign_splits(
+        dates,
+        cutoff=cutoff,
+        test_fraction=test_fraction,
+        train_val_ratio=train_val_ratio,
+        seed=seed,
     )
-    rng = random.Random(seed)
-    n_all = len(all_apps)
-    n_target = max(1, int(round(test_fraction * n_all))) if n_all else 0
-    if len(test_pool) <= n_target:
-        test_ids = set(test_pool)
-    else:
-        test_ids = set(rng.sample(test_pool, n_target))
-    rest = sorted(app for app in all_apps if app not in test_ids)
-    rng.shuffle(rest)
-    n_train = int(round(train_val_ratio * len(rest)))
-    train_ids = set(rest[:n_train])
-    val_ids = set(rest[n_train:])
+    print(
+        f"task={task} run={run_name} shards={source} rows={len(rows)}",
+        flush=True,
+    )
 
-    split_of = {}
-    for app in train_ids:
-        split_of[app] = "train"
-    for app in val_ids:
-        split_of[app] = "val"
-    for app in test_ids:
-        split_of[app] = "test"
+    buckets: dict[str, list[dict[str, Any]]] = {"train": [], "val": [], "test": []}
+    for record in rows:
+        app = record_application_number(record)
+        name = split_of.get(app)
+        if name:
+            buckets[name].append(record)
 
-    dest = output_root / "splits" / gen_slug
+    dest = output_root / "splits" / run_name / task
     dest.mkdir(parents=True, exist_ok=True)
-    counts: dict[str, dict[str, int]] = {}
-    exemplars: dict[str, list[dict[str, Any]]] = {}
+    for name, split_rows in buckets.items():
+        write_jsonl_gz(dest / f"{name}.jsonl.gz", split_rows)
+    counts = {name: len(split_rows) for name, split_rows in buckets.items()}
 
-    for task_id in TASKS:
-        buckets: dict[str, list[dict[str, Any]]] = {"train": [], "val": [], "test": []}
-        for rec in by_task[task_id]:
-            app = str(rec.get("application_number") or "").strip()
-            name = split_of.get(app)
-            if name:
-                buckets[name].append(rec)
-        task_dir = dest / task_id
-        for name, rows in buckets.items():
-            write_jsonl_gz(task_dir / f"{name}.jsonl.gz", rows)
-        counts[task_id] = {k: len(v) for k, v in buckets.items()}
-        pool = list(buckets["train"])
-        rng.shuffle(pool)
-        chosen = pool[: max(0, k)]
-        exemplars[task_id] = [
-            {
-                "application_number": str(rec.get("application_number") or ""),
-                "instruction": str(rec.get("instruction") or ""),
-                "input": truncate_input(str(rec.get("input") or ""), exemplar_chars),
-                "output": str(rec.get("output") or ""),
-            }
-            for rec in chosen
-        ]
-        print(
-            f"[{task_id}] train={counts[task_id]['train']} "
-            f"val={counts[task_id]['val']} test={counts[task_id]['test']} "
-            f"exemplars={len(exemplars[task_id])}",
-            flush=True,
-        )
+    rng = random.Random(seed)
+    pool = list(buckets["train"])
+    rng.shuffle(pool)
+    exemplars = [
+        {
+            "application_number": record_application_number(record),
+            "instruction": str(record.get("instruction") or ""),
+            "input": truncate_input(str(record.get("input") or ""), exemplar_chars),
+            "output": str(record.get("output") or ""),
+        }
+        for record in pool[: max(0, k)]
+    ]
 
+    n_test = sum(1 for name in split_of.values() if name == "test")
+    n_train = sum(1 for name in split_of.values() if name == "train")
+    n_val = sum(1 for name in split_of.values() if name == "val")
+    n_test_pool = sum(
+        1
+        for filed in dates.values()
+        if filed is not None and filed >= cutoff
+    )
     manifest = {
-        "generator": gen_slug,
+        "task": task,
+        "run": run_name,
+        "source_dir": str(source),
         "seed": seed,
         "test_min_filed_date": cutoff.isoformat(),
-        "date_field": "filedDate",
-        "patents_dir": str(patents_dir),
-        "n_unique_apps": n_all,
-        "n_missing_date": n_missing,
-        "n_test_pool": len(test_pool),
-        "n_test": len(test_ids),
-        "test_sampled_from_pool": len(test_pool) > n_target if n_all else False,
-        "n_train": len(train_ids),
-        "n_val": len(val_ids),
-        "task_counts": counts,
+        "date_field": "meta.filed_date",
+        "n_rows": len(rows),
+        "n_unique_apps": len(dates),
+        "n_missing_application_number": n_missing_app,
+        "n_missing_date": n_missing_date,
+        "n_date_conflicts": n_conflicts,
+        "n_test_pool": n_test_pool,
+        "n_test": n_test,
+        "test_sampled_from_pool": n_test_pool > max(1, int(round(test_fraction * len(dates))))
+        if dates
+        else False,
+        "n_train": n_train,
+        "n_val": n_val,
+        "counts": counts,
         "fewshot_k": k,
-        "k_effective": {task_id: len(exemplars.get(task_id) or []) for task_id in TASKS},
+        "k_effective": len(exemplars),
         "exemplar_input_chars": exemplar_chars,
     }
     (dest / "split_manifest.json").write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )
-    (dest / "exemplars.json").write_text(
-        json.dumps(exemplars, indent=2) + "\n", encoding="utf-8"
+    (output_root / "splits" / run_name / "exemplars.json").write_text(
+        json.dumps({task: exemplars}, indent=2) + "\n", encoding="utf-8"
     )
     print(f"Wrote splits → {dest}", flush=True)
     print(
-        f"apps unique={n_all} missing_date={n_missing} "
-        f"test_pool={len(test_pool)} test={len(test_ids)} "
-        f"train={len(train_ids)} val={len(val_ids)}",
+        f"apps unique={len(dates)} missing_date={n_missing_date} "
+        f"missing_app={n_missing_app} test_pool={n_test_pool} "
+        f"test={n_test} train={n_train} val={n_val} "
+        f"rows train={counts['train']} val={counts['val']} test={counts['test']}",
         flush=True,
     )
     return 0

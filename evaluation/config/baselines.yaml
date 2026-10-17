@@ -1,6 +1,8 @@
 # Zero-shot / few-shot OpenRouter baselines (no SFT).
 
 paths:
+  # Split reads part-*.jsonl[.gz] from {derived_root}/{task}/{run_name}/.
+  derived_root: data/derived
   passed_root: data/derived/instruction_generation_validation
   patents_dir: data/derived/patent_search_clean
   output_root: data/derived/evaluation
