@@ -1,8 +1,11 @@
 """Hop-wise IPC multiple choice along the office primary-IPC path.
 
-A primary symbol N places deep (section = 1) yields N-1 records, one per
-edge from each ancestor to the next place on the path. The gold child is
-the next place on that path.
+A primary symbol N places deep (section = 1) yields one record per edge
+from each ancestor to the next place on the path. The gold child is the
+next place on that path. When the primary place itself has children, one
+further record is written there: the menu is those children, and the gold
+choice is the stop token. A primary place with no children is a leaf; the
+walk ends without asking, so no stop record is written.
 
 When ``justify`` is true (the default), the teacher writes a short
 justification for that gold child. The student input does not contain the
@@ -15,7 +18,9 @@ symbol only and the teacher is not called.
 - ``include_abstract`` (default true): omit the abstract when false
 - ``claims``: ``claim_1`` (default) or ``omit``
 - ``justify`` (default true): teacher justification before the symbol
-- ``stop_token`` (default ``<STOP>``): last menu option; gold is still the next place
+- ``stop_token`` (default ``<STOP>``): last menu option. Gold on a path
+  edge is the next place. Gold at the primary place, when it has children,
+  is this token.
 """
 
 from __future__ import annotations
@@ -65,6 +70,10 @@ TEACHER_SYSTEM = "You are an expert Australian Patent Examiner."
 TEACHER_TRAILER = """Write a short justification (about 40–90 words) that maps concrete features of this patent onto the correct symbol's title.
 
 Use only the supplied patent text and that title. Do not mention the other choices or any other IPC symbol. Do not write a Classification line. Respond with the justification only."""
+
+TEACHER_TRAILER_STOP = """Write a short justification (about 40–90 words) that explains why this patent is covered by the current place and should remain there rather than move to a more specific child.
+
+Use only the supplied patent text and the current place's title. Do not mention the other choices or any other IPC symbol. Do not write a Classification line. Respond with the justification only."""
 
 _CLAIMS_CLAIM_1 = "claim_1"
 _CLAIMS_OMIT = "omit"
@@ -196,24 +205,28 @@ class IPCLCPNTask(Task):
         if path is None:
             return None
 
-        hops: list[tuple[IPCNode, IPCNode, list[IPCNode]]] = []
+        stop_token = self._stop_token()
+        hops: list[tuple[IPCNode, str, list[IPCNode], bool]] = []
         for index in range(len(path) - 1):
             now = path[index]
             gold = path[index + 1]
             children = self._accessor.get_children(now.node_id)
             if not any(child.node_id == gold.node_id for child in children):
                 return None
-            hops.append((now, gold, children))
+            hops.append((now, gold.node_id, children, False))
+        final = path[-1]
+        final_children = self._accessor.get_children(final.node_id)
+        if final_children:
+            hops.append((final, stop_token, final_children, True))
 
         document = self._document(patent)
         claims_mode = self._claims_mode()
         include_abstract = self._include_abstract()
         justify = self._justify()
-        stop_token = self._stop_token()
         records: list[dict[str, Any]] = []
         n_hops = len(hops)
-        for index, (now, gold, children) in enumerate(hops):
-            ancestors = path[: index + 1]
+        for index, (now, gold_id, children, is_stop) in enumerate(hops):
+            ancestors = path if is_stop else path[: index + 1]
             titles = _title_path(ancestors)
             choice_lines = _choice_lines(children, stop_token=stop_token)
             blocks: list[str] = []
@@ -227,14 +240,17 @@ class IPCLCPNTask(Task):
                 justification, fitted = self._justify_hop(
                     patent,
                     now=now,
-                    gold=gold,
+                    gold_id=gold_id,
+                    gold_title="" if is_stop else self._child_title(children, gold_id),
                     titles=titles,
                     choice_lines=choice_lines,
+                    stop_token=stop_token,
+                    is_stop=is_stop,
                 )
-                output_text = f"{justification}\nClassification: {gold.node_id}"
+                output_text = f"{justification}\nClassification: {gold_id}"
                 instruction = _instruction_justify(stop_token)
             else:
-                output_text = gold.node_id
+                output_text = gold_id
                 instruction = _instruction_label(stop_token)
             extra: dict[str, Any] = {}
             if fitted is not None:
@@ -246,7 +262,8 @@ class IPCLCPNTask(Task):
                     input_text=input_text,
                     output_text=output_text,
                     now_node_id=now.node_id,
-                    gold_node_id=gold.node_id,
+                    gold_node_id=gold_id,
+                    is_stop=is_stop,
                     hop_index=index,
                     n_hops=n_hops,
                     depth=len(path),
@@ -261,27 +278,46 @@ class IPCLCPNTask(Task):
             )
         return records
 
+    def _child_title(self, children: list[IPCNode], gold_id: str) -> str:
+        for child in children:
+            if child.node_id == gold_id:
+                return child.title
+        return ""
+
     def _justify_hop(
         self,
         patent: PatentText,
         *,
         now: IPCNode,
-        gold: IPCNode,
+        gold_id: str,
+        gold_title: str,
         titles: str,
         choice_lines: str,
+        stop_token: str,
+        is_stop: bool,
     ) -> tuple[str, Any]:
-        scene = [
-            f"The correct next IPC symbol is {gold.node_id} ({gold.title}).",
-            "Do not choose a different symbol.",
-            "",
+        if is_stop:
+            header = [
+                f"The correct choice is {stop_token}.",
+                f"Remain at the current place {now.node_id} ({now.title}).",
+                "Do not choose a child symbol.",
+            ]
+            trailer = TEACHER_TRAILER_STOP
+        else:
+            header = [
+                f"The correct next IPC symbol is {gold_id} ({gold_title}).",
+                "Do not choose a different symbol.",
+            ]
+            trailer = TEACHER_TRAILER
+        body = [
             f"Current node: {now.node_id}",
             f"Titles: {titles}",
             "",
             f"Children:\n{choice_lines}",
         ]
         if self._include_abstract():
-            scene[2:2] = ["", f"Abstract:\n{patent.abstract}"]
-        instruction = "\n".join(scene)
+            body[0:0] = [f"Abstract:\n{patent.abstract}", ""]
+        instruction = "\n".join(header + ["", *body])
         fitted = None
         if self._claims_mode() == _CLAIMS_CLAIM_1:
             budget = self.prompt_budget or prompt_budget_from_config(
@@ -298,7 +334,7 @@ class IPCLCPNTask(Task):
                     system=TEACHER_SYSTEM,
                     instruction=instruction,
                     claims=[patent.claim_1],
-                    trailer=TEACHER_TRAILER,
+                    trailer=trailer,
                     budget=budget,
                     application_number=patent.application_number,
                     task=self.task_id,
@@ -318,7 +354,7 @@ class IPCLCPNTask(Task):
                 {"role": "system", "content": TEACHER_SYSTEM},
                 {
                     "role": "user",
-                    "content": f"{instruction}\n\n{TEACHER_TRAILER}",
+                    "content": f"{instruction}\n\n{trailer}",
                 },
             ]
         return _justification_body(self.client.chat(messages)), fitted

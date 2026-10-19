@@ -114,9 +114,36 @@ class IPCLCPNTests(unittest.TestCase):
         )
         self.assertNotIn("A01C", menu)
         self.assertEqual(records[0]["meta"]["stop_token"], "<STOP>")
+        self.assertFalse(records[-1]["meta"]["is_stop"])
         self.assertEqual(records[0]["meta"]["filed_date"], "2020-03-15")
         self.assertEqual(records[-1]["meta"]["filed_date"], "2020-03-15")
         self.assertIn("or <STOP> if none of the children fit", records[0]["instruction"])
+
+    def test_primary_with_children_ends_on_stop(self) -> None:
+        records = self._task().generate(_patent(primary_ipc="A01B1/00"))
+        assert records is not None
+        self.assertEqual(
+            [record["output"] for record in records],
+            ["A01", "A01B", "A01B1/00", "<STOP>"],
+        )
+        stop = records[-1]
+        self.assertTrue(stop["meta"]["is_stop"])
+        self.assertEqual(stop["meta"]["now_node_id"], "A01B1/00")
+        self.assertEqual(stop["meta"]["gold_node_id"], "<STOP>")
+        self.assertEqual(stop["meta"]["hop_index"], 3)
+        self.assertEqual(stop["meta"]["n_hops"], 4)
+        self.assertEqual(stop["meta"]["depth"], 4)
+        self.assertIn("Current node: A01B1/00", stop["input"])
+        self.assertIn("1. A01B1/02 - SPADES", stop["input"])
+        self.assertIn("2. A01B1/20 - PADDED", stop["input"])
+        self.assertIn(
+            "3. <STOP> - none of these children; remain at the current place",
+            stop["input"],
+        )
+        self.assertEqual(
+            stop["input"].split("Titles: ", 1)[1].split("\n", 1)[0],
+            "HUMAN > AGRI > SOIL > HAND",
+        )
 
     def test_stop_token_is_configurable(self) -> None:
         records = self._task(stop_token="HALT").generate(_patent())
@@ -194,6 +221,33 @@ class IPCLCPNTests(unittest.TestCase):
         )
         self.assertTrue(records[0]["meta"]["justify"])
         self.assertIn("Classification:", records[0]["instruction"])
+
+    def test_stop_hop_justification(self) -> None:
+        seen: list[str] = []
+
+        class _Client:
+            config = SimpleNamespace(model="teacher", provider="fake")
+
+            def chat(self, messages: list[dict[str, str]], **_kwargs: object) -> str:
+                seen.append(messages[-1]["content"])
+                return "The disclosure is already covered by the current place."
+
+        task = IPCLCPNTask(
+            _Client(),  # type: ignore[arg-type]
+            options={"justify": True, "claims": "omit", "include_abstract": False},
+        )
+        task._accessor = self.accessor
+        records = task.generate(_patent(primary_ipc="A01B1/00"))
+        assert records is not None
+        self.assertEqual(len(seen), 4)
+        self.assertIn("The correct choice is <STOP>.", seen[-1])
+        self.assertIn("Remain at the current place A01B1/00 (HAND).", seen[-1])
+        self.assertNotIn("The correct choice is <STOP>.", records[-1]["input"])
+        self.assertEqual(
+            records[-1]["output"],
+            "The disclosure is already covered by the current place.\n"
+            "Classification: <STOP>",
+        )
 
 
 if __name__ == "__main__":

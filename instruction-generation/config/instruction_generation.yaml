@@ -8,24 +8,23 @@ paths:
   output_dir: data/derived/instruction_generation
 
 llm:
-  # local = Ollama native /api/chat (not the OpenAI /v1 shim — that path did not
-  # honour num_ctx=8192; native does). openrouter = OpenRouter OpenAI API.
-  provider: local
-  model: llama3.1:8b
-  base_url: http://127.0.0.1:11434/v1
-  # Env var holding the API key. Local servers often accept any non-empty value.
-  # OpenRouter uses OPENROUTER_API_KEY when provider is switched.
-  api_key_env: OPENAI_API_KEY
-  temperature: 0.7
+  # local = Ollama native /api/chat. openrouter = OpenRouter OpenAI API.
+  # Teacher is Qwen3-235B-A22B-Instruct-2507. The student is set in sft/config/sft.yaml.
+  provider: openrouter
+  model: qwen/qwen3-235b-a22b-2507
+  base_url: https://openrouter.ai/api/v1
+  api_key_env: OPENROUTER_API_KEY
+  temperature: 0.0
   # Generation length; also used as max_output_tokens for the input budget.
   max_tokens: 1024
   max_output_tokens: 1024
-  # Explicit Ollama context window. Input budget = num_ctx - max_output_tokens - safety_margin.
+  # Input budget = num_ctx - max_output_tokens - safety_margin.
+  # Kept at 8192 so a hop the student cannot fit is not sent to the teacher.
   num_ctx: 8192
   safety_margin: 64
-  # HuggingFace tokenizer for exact prompt token counts (Llama-3 BPE; Meta's
-  # gated Meta-Llama-3.1-8B tokenizer is equivalent). Ollama has no tokenize API.
-  tokenizer_id: NousResearch/Meta-Llama-3-8B
+  # HuggingFace tokenizer for prompt token counts. Same family as the teacher;
+  # only the tokenizer files are downloaded, not the 235B weights.
+  tokenizer_id: Qwen/Qwen3-235B-A22B-Instruct-2507
   # Belt-and-braces: repeat the instruction after the claims so a front-truncating
   # backend still leaves a copy of the instruction at the end.
   repeat_instruction: true
@@ -46,13 +45,14 @@ tasks:
     # Teacher writes a short justification, then Classification: <symbol>.
     # Set false to store the symbol only and skip the teacher call.
     justify: false
-    # Last row of every child menu. Gold is still the next place on the path.
+    # Last row of every child menu. On a path edge, gold is the next place.
+    # At the primary place, when it still has children, gold is this token.
     stop_token: "<STOP>"
 
 run:
   # Records per output shard part-NNNNN.jsonl.gz
   shard_size: 100
-  # Concurrent LLM calls. Keep 1 for a serial local server; 8–16 is typical for OpenRouter.
-  workers: 1
+  # Concurrent LLM calls. 8–16 is typical for OpenRouter.
+  workers: 12
   # Cap successful writes this run (null = all pending). Skips do not count.
   limit: null
