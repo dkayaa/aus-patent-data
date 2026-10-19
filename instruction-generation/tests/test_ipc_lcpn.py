@@ -109,14 +109,14 @@ class IPCLCPNTests(unittest.TestCase):
         self.assertIn("1. A01B1/00 - HAND", menu)
         self.assertIn("2. A01B3/00 - PLOUGHS", menu)
         self.assertIn(
-            "3. STOP - none of these children; remain at the current place",
+            "3. <STOP> - none of these children; remain at the current place",
             menu,
         )
         self.assertNotIn("A01C", menu)
-        self.assertEqual(records[0]["meta"]["stop_token"], "STOP")
+        self.assertEqual(records[0]["meta"]["stop_token"], "<STOP>")
         self.assertEqual(records[0]["meta"]["filed_date"], "2020-03-15")
         self.assertEqual(records[-1]["meta"]["filed_date"], "2020-03-15")
-        self.assertIn("or STOP if none of the children fit", records[0]["instruction"])
+        self.assertIn("or <STOP> if none of the children fit", records[0]["instruction"])
 
     def test_stop_token_is_configurable(self) -> None:
         records = self._task(stop_token="HALT").generate(_patent())

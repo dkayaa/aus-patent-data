@@ -41,7 +41,7 @@ def walk_ipc(
     abstract: str = "",
     claim_1: str = "",
 ) -> WalkResult:
-    """Classify one patent by walking from ROOT down until STOP or a leaf."""
+    """Classify one patent by walking from the root down until stop or a leaf."""
     document = build_document(
         abstract=abstract,
         claim_1=claim_1,

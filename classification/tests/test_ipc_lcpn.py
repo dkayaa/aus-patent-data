@@ -75,8 +75,8 @@ class PromptTests(unittest.TestCase):
         kids = [_node("A", "HUMAN NECESSITIES", kind="s")]
         messages = build_hop_messages(
             document="Abstract:\nHello",
-            current_id="ROOT",
-            titles="ROOT",
+            current_id="<ROOT>",
+            titles="<ROOT>",
             children=kids,
             stop_token="STOP",
             justify=True,
@@ -84,7 +84,7 @@ class PromptTests(unittest.TestCase):
         self.assertEqual(messages[0]["role"], "system")
         self.assertEqual(messages[1]["role"], "user")
         user = messages[1]["content"]
-        self.assertIn("Current node: ROOT", user)
+        self.assertIn("Current node: <ROOT>", user)
         self.assertIn("Classification:", user)
         self.assertIn("STOP", user)
 
@@ -99,7 +99,7 @@ class WalkMockTests(unittest.TestCase):
     def test_walk_stops_on_stop_token(self) -> None:
         replies = [
             "Section A fits.\nClassification: A\n",
-            "Stop here.\nClassification: STOP\n",
+            "Stop here.\nClassification: <STOP>\n",
         ]
 
         class Scripted:

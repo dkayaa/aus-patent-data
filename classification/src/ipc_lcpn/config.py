@@ -60,8 +60,8 @@ def load_config(path: Path | None = None) -> IPCLCPNConfig:
     output_dir = resolve_path(paths.get("output_dir") or "data/derived/ipc_lcpn")
 
     return IPCLCPNConfig(
-        stop_token=str(raw.get("stop_token") or "STOP").strip() or "STOP",
-        root_label=str(raw.get("root_label") or "ROOT").strip() or "ROOT",
+        stop_token=str(raw.get("stop_token") or "<STOP>").strip() or "<STOP>",
+        root_label=str(raw.get("root_label") or "<ROOT>").strip() or "<ROOT>",
         include_abstract=bool(raw.get("include_abstract", True)),
         claims=claims,
         justify=bool(raw.get("justify", True)),

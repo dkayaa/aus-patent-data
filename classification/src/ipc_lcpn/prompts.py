@@ -5,18 +5,23 @@ from __future__ import annotations
 from ipc.accessor import IPCNode
 
 # Kept close to instruction-generation/src/tasks/ipc_lcpn.py wording.
-INSTRUCTION_LABEL = (
-    "Select the IPC symbol that correctly continues the classification "
-    "from the current place, or STOP if none of the children fit. "
-    "Answer with the symbol or STOP only."
-)
+def _instruction_label(stop_token: str) -> str:
+    return (
+        "Select the IPC symbol that correctly continues the classification "
+        "from the current place, or "
+        f"{stop_token} if none of the children fit. "
+        f"Answer with the symbol or {stop_token} only."
+    )
 
-INSTRUCTION_JUSTIFY = (
-    "Select the IPC symbol that correctly continues the classification "
-    "from the current place, or STOP if none of the children fit. "
-    "Write a short justification grounded in the patent text, then a line "
-    "of the form Classification: <symbol_or_STOP>."
-)
+
+def _instruction_justify(stop_token: str) -> str:
+    return (
+        "Select the IPC symbol that correctly continues the classification "
+        "from the current place, or "
+        f"{stop_token} if none of the children fit. "
+        "Write a short justification grounded in the patent text, then a line "
+        f"of the form Classification: <IPC symbol or {stop_token}>."
+    )
 
 SYSTEM_PROMPT = (
     "You are an expert Australian Patent Examiner. "
@@ -66,7 +71,9 @@ def build_hop_messages(
     stop_token: str,
     justify: bool,
 ) -> list[dict[str, str]]:
-    instruction = INSTRUCTION_JUSTIFY if justify else INSTRUCTION_LABEL
+    instruction = (
+        _instruction_justify(stop_token) if justify else _instruction_label(stop_token)
+    )
     blocks: list[str] = [instruction, ""]
     if document:
         blocks.append(document)

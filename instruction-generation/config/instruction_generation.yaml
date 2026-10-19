@@ -47,7 +47,7 @@ tasks:
     # Set false to store the symbol only and skip the teacher call.
     justify: false
     # Last row of every child menu. Gold is still the next place on the path.
-    stop_token: STOP
+    stop_token: "<STOP>"
 
 run:
   # Records per output shard part-NNNNN.jsonl.gz

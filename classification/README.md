@@ -85,8 +85,8 @@ How it works:
 
 1. Start at the top of the tree.
 2. Show the model the patent text and the list of child IPC codes at the current place.
-3. The model picks one child, or says `STOP` if none fit.
-4. Move to that child and repeat until `STOP` or there are no children left.
+3. The model picks one child, or says `<STOP>` if none fit.
+4. Move to that child and repeat until `<STOP>` or there are no children left.
 5. Print the path of codes it chose.
 
 Code lives in `src/ipc_lcpn/`. Settings live in `config/ipc_lcpn.yaml`. The IPC tree comes from the top-level `ipc/` package. The prompt format matches the `ipc_lcpn` training task in `instruction-generation/`.

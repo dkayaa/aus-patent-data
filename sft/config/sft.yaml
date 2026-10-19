@@ -23,9 +23,9 @@ train:
   lr_scheduler_type: cosine
   warmup_ratio: 0.03
   logging_steps: 10
-  save_steps: 200
+  save_steps: 1000
   eval_strategy: steps
-  eval_steps: 200
+  eval_steps: 1000
   bf16: true
   gradient_checkpointing: true
   packing: false

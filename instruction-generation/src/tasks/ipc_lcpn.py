@@ -15,7 +15,7 @@ symbol only and the teacher is not called.
 - ``include_abstract`` (default true): omit the abstract when false
 - ``claims``: ``claim_1`` (default) or ``omit``
 - ``justify`` (default true): teacher justification before the symbol
-- ``stop_token`` (default ``STOP``): last menu option; gold is still the next place
+- ``stop_token`` (default ``<STOP>``): last menu option; gold is still the next place
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ def _instruction_justify(stop_token: str) -> str:
         "from the current place, or "
         f"{stop_token} if none of the children fit. "
         "Write a short justification grounded in the patent text, then a line "
-        f"of the form Classification: <symbol_or_{stop_token}>."
+        f"of the form Classification: <IPC symbol or {stop_token}>."
     )
 
 
@@ -334,7 +334,7 @@ class IPCLCPNTask(Task):
         return _as_bool(self.options.get("justify"), True)
 
     def _stop_token(self) -> str:
-        token = str(self.options.get("stop_token") or "STOP").strip()
+        token = str(self.options.get("stop_token") or "<STOP>").strip()
         if not token:
             raise ValueError("tasks.ipc_lcpn.stop_token must be a non-empty string")
         return token

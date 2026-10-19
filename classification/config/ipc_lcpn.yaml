@@ -1,8 +1,8 @@
 # Student/Final model IPC LCPN runner settings
 
 # These can be configured to any value required.
-stop_token: STOP
-root_label: ROOT
+stop_token: "<STOP>"
+root_label: "<ROOT>"
 
 # Patent fields to include in each hop
 include_abstract: true
