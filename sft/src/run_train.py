@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import sys
 from datetime import datetime, timezone
@@ -41,6 +42,40 @@ def _load_jsonl_gz(path: Path) -> list[dict[str, Any]]:
     if not path.is_file():
         raise FileNotFoundError(path)
     return list(iter_jsonl_gz(path))
+
+
+def _fit_sft_config(config_cls: type, kwargs: dict[str, Any]) -> Any:
+    """Pass only arguments this TRL/transformers build still accepts.
+
+    ``max_seq_length`` was renamed to ``max_length``. ``warmup_ratio`` was
+    removed in transformers 5.2; a ``warmup_steps`` value below 1 is the ratio.
+    """
+    params = inspect.signature(config_cls).parameters
+    accepts_var_kw = any(
+        param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()
+    )
+    fitted = dict(kwargs)
+    if "max_length" in fitted and "max_length" not in params and "max_seq_length" in params:
+        fitted["max_seq_length"] = fitted.pop("max_length")
+    if (
+        "warmup_ratio" in fitted
+        and "warmup_ratio" not in params
+        and "warmup_steps" in params
+    ):
+        fitted["warmup_steps"] = fitted.pop("warmup_ratio")
+    if (
+        "eval_strategy" in fitted
+        and "eval_strategy" not in params
+        and "evaluation_strategy" in params
+    ):
+        fitted["evaluation_strategy"] = fitted.pop("eval_strategy")
+    if not accepts_var_kw:
+        dropped = [key for key in fitted if key not in params]
+        for key in dropped:
+            fitted.pop(key)
+        if dropped:
+            print(f"SFTConfig ignored: {', '.join(dropped)}", flush=True)
+    return config_cls(**fitted)
 
 
 def _maybe_limit(rows: list[dict[str, Any]], limit: int | None) -> list[dict[str, Any]]:
@@ -233,6 +268,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
         "learning_rate": float(train_cfg.get("learning_rate") or 2e-4),
         "lr_scheduler_type": str(train_cfg.get("lr_scheduler_type") or "cosine"),
+        "max_length": max_seq,
         "warmup_ratio": float(train_cfg.get("warmup_ratio") or 0.03),
         "logging_steps": int(train_cfg.get("logging_steps") or 10),
         "save_steps": int(train_cfg.get("save_steps") or 200),
@@ -250,21 +286,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         sft_kwargs["eval_strategy"] = "no"
 
-    # TRL renamed max_seq_length → max_length across versions.
-    try:
-        sft_args = SFTConfig(max_length=max_seq, **sft_kwargs)
-    except TypeError:
-        sft_kwargs.pop("completion_only_loss", None)
-        try:
-            sft_args = SFTConfig(max_seq_length=max_seq, **sft_kwargs)
-        except TypeError:
-            sft_kwargs.pop("eval_strategy", None)
-            sft_kwargs["evaluation_strategy"] = (
-                str(train_cfg.get("eval_strategy") or "steps")
-                if eval_ds is not None
-                else "no"
-            )
-            sft_args = SFTConfig(max_seq_length=max_seq, **sft_kwargs)
+    sft_args = _fit_sft_config(SFTConfig, sft_kwargs)
 
     trainer_kwargs: dict[str, Any] = {
         "model": model,
