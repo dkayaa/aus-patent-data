@@ -15,6 +15,7 @@ for path in (REPO, SRC):
 from ipc.accessor import IPCAccessor, IPCNode  # noqa: E402
 
 from ipc_lcpn.config import load_config  # noqa: E402
+from ipc_lcpn.hops import hop_messages, menu_codes, score_hops  # noqa: E402
 from ipc_lcpn.parse import HopParseError, parse_hop_response  # noqa: E402
 from ipc_lcpn.prompts import build_hop_messages, choice_lines  # noqa: E402
 from ipc_lcpn.walk import walk_ipc  # noqa: E402
@@ -121,6 +122,71 @@ class WalkMockTests(unittest.TestCase):
         self.assertEqual(result.path, ["A"])
         self.assertEqual(result.stop_reason, "stop")
         self.assertEqual(len(result.hops), 2)
+
+
+def _hop(gold: str, *, justify: bool = False) -> dict:
+    return {
+        "application_number": "2020000001",
+        "instruction": "Pick the next symbol.",
+        "input": (
+            "Claim 1:\nA spade\n\n"
+            "Current node: A01B\n"
+            "Titles: SOIL\n\n"
+            "Children:\n"
+            "1. A01B1/02 - SPADES\n"
+            "2. A01B1/20 - PADDED\n"
+            "3. <STOP> - none of these children; remain at the current place"
+        ),
+        "meta": {
+            "gold_node_id": gold,
+            "hop_index": 0,
+            "justify": justify,
+            "stop_token": "<STOP>",
+        },
+    }
+
+
+class IndependentHopTests(unittest.TestCase):
+    def test_messages_match_training_rows(self) -> None:
+        messages = hop_messages(_hop("A01B1/02"))
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]["role"], "user")
+        self.assertTrue(messages[0]["content"].startswith("Pick the next symbol.\n\nClaim 1:"))
+        self.assertEqual(
+            menu_codes(messages[0]["content"], stop_token="<STOP>"),
+            {"A01B1/02", "A01B1/20"},
+        )
+
+    def test_each_hop_is_scored_on_its_own(self) -> None:
+        replies = ["A01B1/02", "A01B1/20", "<STOP>", "not-a-code"]
+
+        class Scripted:
+            def __init__(self) -> None:
+                self.i = 0
+                self.seen: list[str] = []
+
+            def chat(self, messages, *, temperature=None, max_tokens=None):
+                self.seen.append(messages[0]["content"])
+                text = replies[self.i]
+                self.i += 1
+                return text
+
+        client = Scripted()
+        result = score_hops(
+            [
+                _hop("A01B1/02"),
+                _hop("A01B1/02"),
+                _hop("<STOP>"),
+                _hop("A01B1/02"),
+            ],
+            client=client,
+            cfg=load_config(),
+        )
+        self.assertEqual([score.correct for score in result.scores], [True, False, True, False])
+        self.assertEqual(result.n_correct, 2)
+        self.assertEqual(result.n_parse_errors, 1)
+        self.assertEqual(len(client.seen), 4)
+        self.assertNotIn("system", client.seen[0])
 
 
 if __name__ == "__main__":

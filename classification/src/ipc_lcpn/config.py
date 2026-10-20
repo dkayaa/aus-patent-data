@@ -13,6 +13,7 @@ DEFAULT_CONFIG = REPO_ROOT / "classification" / "config" / "ipc_lcpn.yaml"
 
 _CLAIMS_MODES = frozenset({"claim_1", "omit"})
 _PROVIDERS = frozenset({"local", "openrouter", "hf"})
+_MODES = frozenset({"walk", "hops"})
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,8 @@ class IPCLCPNConfig:
     claims: str
     justify: bool
     max_hops: int
+    mode: str
+    hops_path: Path | None
     llm: dict[str, Any]
     hf: dict[str, Any]
     output_dir: Path
@@ -49,6 +52,14 @@ def load_config(path: Path | None = None) -> IPCLCPNConfig:
     if claims not in _CLAIMS_MODES:
         raise ValueError(f"claims must be one of {sorted(_CLAIMS_MODES)}, got {claims!r}")
 
+    mode = str(raw.get("mode") or "walk").strip().lower()
+    if mode not in _MODES:
+        raise ValueError(f"mode must be one of {sorted(_MODES)}, got {mode!r}")
+    hops_raw = raw.get("hops_path")
+    hops_path = None
+    if hops_raw is not None and str(hops_raw).strip() not in {"", "null", "None"}:
+        hops_path = resolve_path(str(hops_raw))
+
     llm = dict(raw.get("llm") or {})
     provider = str(llm.get("provider") or "local").strip().lower()
     if provider not in _PROVIDERS:
@@ -66,6 +77,8 @@ def load_config(path: Path | None = None) -> IPCLCPNConfig:
         claims=claims,
         justify=bool(raw.get("justify", True)),
         max_hops=int(raw.get("max_hops") or 16),
+        mode=mode,
+        hops_path=hops_path,
         llm=llm,
         hf=hf,
         output_dir=output_dir,

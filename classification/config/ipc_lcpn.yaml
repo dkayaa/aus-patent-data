@@ -9,6 +9,12 @@ include_abstract: true
 claims: claim_1   # claim_1 | omit
 justify: true
 
+# walk = descend from the root, following the model's own choices.
+# hops = score each stored hop on its own. The office path is already in the row.
+mode: walk
+# JSONL or JSONL.GZ of hop records. Required when mode is hops. Overridden by --hops.
+hops_path: null
+
 # Max hops (safety). Assuming IPC has an order of 13 steps:
 # (section → class → subclass → main group → up to 9-dot subgroup)
 # max path length acc to IPCAccessor = 13
