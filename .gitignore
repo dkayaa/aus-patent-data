@@ -6,6 +6,10 @@ classification/models/**
 # Hugging Face / MiniCheck local caches (large; regenerate with pipeline scripts)
 ckpts/
 
+# H200 pilot LoRA adapters (local copy of /mnt/data/sft)
+data/h200-sft-pilot/ipc-lcpn-justify-qwen3-8b/
+data/h200-sft-pilot/ipc-lcpn-nojustify-qwen3-8b/
+
 # Mode 1 faithfulness run outputs (regenerate via scripts/run_faithfulness_ipc.py)
 data/derived/instruction_generation_validation/*/faithfulness/
 
