@@ -44,7 +44,7 @@ tasks:
     claims: claim_1
     # Teacher writes a short justification, then Classification: <symbol>.
     # Set false to store the symbol only and skip the teacher call.
-    justify: false
+    justify: true
     # Last row of every child menu. On a path edge, gold is the next place.
     # At the primary place, when it still has children, gold is this token.
     stop_token: "<STOP>"
