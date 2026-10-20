@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+# Qwen3 writes this block before the answer when thinking is left on.
+_THINK_BLOCK = re.compile(r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -76,11 +80,19 @@ class HFClient:
 
         tokenizer = self._tokenizer
         model = self._model
-        prompt = tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-        )
+        try:
+            prompt = tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=False,
+            )
+        except TypeError:
+            prompt = tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
         inputs = tokenizer(prompt, return_tensors="pt")
         inputs = {k: v.to(model.device) for k, v in inputs.items()}
         do_sample = temp is not None and float(temp) > 0
@@ -94,6 +106,7 @@ class HFClient:
             )
         new_tokens = out[0][inputs["input_ids"].shape[-1] :]
         text = tokenizer.decode(new_tokens, skip_special_tokens=True)
+        text = _THINK_BLOCK.sub("", text)
         if not text.strip():
             raise RuntimeError("HF model returned empty content")
         return text.strip()
