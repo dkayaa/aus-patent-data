@@ -15,11 +15,11 @@ The shuffle is seeded by the application number and the office step, so a
 repeat of the same filing picks the same child. Those rows follow the
 on-path rows and do not change on-path hop indexes.
 
-When ``justify`` is true (the default), the teacher writes a short
-justification for that gold child. The student input does not contain the
-gold symbol. The stored output is the justification, then
-``Classification: <symbol>``. When ``justify`` is false, the output is the
-symbol only and the teacher is not called.
+When ``justify`` is true (the default), the teacher writes a short chain of
+thought for that gold child. The student input does not contain the gold
+symbol. The stored output is the reasoning, then ``Classification: <symbol>``.
+When ``justify`` is false, the output is the symbol only and the teacher is
+not called.
 
 ``options`` (YAML ``tasks.ipc_lcpn``):
 
@@ -79,7 +79,7 @@ def _instruction(stop_token: str, *, justify: bool, back_token: str = "") -> str
     if justify:
         return (
             choice
-            + "Write a short justification grounded in the patent text, then a line "
+            + "Write a short chain of thought grounded in the patent text, then a line "
             + f"of the form Classification: <IPC {answer}>."
         )
     return choice + f"Answer with the {answer} only."
@@ -87,17 +87,17 @@ def _instruction(stop_token: str, *, justify: bool, back_token: str = "") -> str
 
 TEACHER_SYSTEM = "You are an expert Australian Patent Examiner."
 
-TEACHER_TRAILER = """Write a short justification (about 40–90 words) that maps concrete features of this patent onto the correct symbol's title.
+TEACHER_TRAILER = """Write a short chain of thought (about 40–90 words) that reasons from the patent text to the correct next place.
 
-Use only the supplied patent text and that title. Do not mention the other choices or any other IPC symbol. Do not write a Classification line. Respond with the justification only."""
+Think through what the claim is about, what the current place leaves open, and why the correct next place follows. Do not restate a menu title and treat that restatement as the reason. Do not write any IPC symbol, code, or menu token, including the correct one. Do not write a Classification line. Respond with the reasoning only."""
 
-TEACHER_TRAILER_STOP = """Write a short justification (about 40–90 words) that explains why this patent is covered by the current place and should remain there rather than move to a more specific child.
+TEACHER_TRAILER_STOP = """Write a short chain of thought (about 40–90 words) that reasons about why the claim should remain at the current place.
 
-Use only the supplied patent text and the current place's title. Do not mention the other choices or any other IPC symbol. Do not write a Classification line. Respond with the justification only."""
+Think through what the claim is about and why none of the finer places is needed. Do not restate a menu title and treat that restatement as the reason. Do not write any IPC symbol, code, or menu token, including the correct one. Do not write a Classification line. Respond with the reasoning only."""
 
-TEACHER_TRAILER_BACK = """Write a short justification (about 40–90 words) that explains why this patent is not covered by the current place and should return to the parent.
+TEACHER_TRAILER_BACK = """Write a short chain of thought (about 40–90 words) that reasons about why the current place does not cover the claim and the walk should return to the parent.
 
-Use only the supplied patent text and the current place's title. Do not mention the other choices or any other IPC symbol. Do not write a Classification line. Respond with the justification only."""
+Think through what the claim is about and why this place is the wrong step. Do not restate a menu title and treat that restatement as the reason. Do not write any IPC symbol, code, or menu token, including the correct one. Do not write a Classification line. Respond with the reasoning only."""
 
 _CLAIMS_CLAIM_1 = "claim_1"
 _CLAIMS_OMIT = "omit"
@@ -466,6 +466,7 @@ class IPCLCPNTask(Task):
                 f"The correct choice is {back_token}.",
                 f"Return to the parent place {parent_id} ({parent_title}).",
                 f"Do not choose a child symbol or {stop_token}.",
+                "In the reasoning, do not repeat this token or any IPC code.",
             ]
             trailer = TEACHER_TRAILER_BACK
         elif is_stop:
@@ -473,12 +474,14 @@ class IPCLCPNTask(Task):
                 f"The correct choice is {stop_token}.",
                 f"Remain at the current place {now_id} ({now_title}).",
                 "Do not choose a child symbol.",
+                "In the reasoning, do not repeat this token or any IPC code.",
             ]
             trailer = TEACHER_TRAILER_STOP
         else:
             header = [
                 f"The correct next IPC symbol is {gold_id} ({gold_title}).",
                 "Do not choose a different symbol.",
+                "In the reasoning, do not repeat this symbol or any other IPC code.",
             ]
             trailer = TEACHER_TRAILER
         body = [

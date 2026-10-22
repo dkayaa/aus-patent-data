@@ -219,6 +219,8 @@ class IPCLCPNTests(unittest.TestCase):
         assert records is not None
         self.assertEqual(len(seen), 5)
         self.assertIn("The correct next IPC symbol is A (HUMAN).", seen[0])
+        self.assertIn("do not repeat this symbol or any other IPC code", seen[0])
+        self.assertIn("Do not write any IPC symbol, code, or menu token", seen[0])
         self.assertNotIn("The correct next IPC symbol", records[0]["input"])
         self.assertEqual(
             records[0]["output"],
@@ -247,6 +249,7 @@ class IPCLCPNTests(unittest.TestCase):
         assert records is not None
         self.assertEqual(len(seen), 5)
         self.assertIn("The correct choice is <STOP>.", seen[-1])
+        self.assertIn("do not repeat this token or any IPC code", seen[-1])
         self.assertIn("Remain at the current place A01B1/00 (HAND).", seen[-1])
         self.assertNotIn("The correct choice is <STOP>.", records[-1]["input"])
         self.assertEqual(
@@ -308,6 +311,7 @@ class IPCLCPNTests(unittest.TestCase):
         assert records is not None
         backs = [record for record in records if record["meta"]["is_back"]]
         self.assertIn("The correct choice is <BACK>.", seen[-len(backs)])
+        self.assertIn("do not repeat this token or any IPC code", seen[-len(backs)])
         self.assertIn("Return to the parent place A01 (AGRI).", seen[-len(backs)])
         self.assertEqual(
             backs[0]["output"],

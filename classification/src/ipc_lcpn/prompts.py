@@ -24,7 +24,7 @@ def _instruction(stop_token: str, *, justify: bool, back_token: str = "") -> str
     if justify:
         return (
             choice
-            + "Write a short justification grounded in the patent text, then a line "
+            + "Write a short chain of thought grounded in the patent text, then a line "
             + f"of the form Classification: <IPC {answer}>."
         )
     return choice + f"Answer with the {answer} only."
