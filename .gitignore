@@ -10,6 +10,10 @@ ckpts/
 data/h200-sft-pilot/ipc-lcpn-justify-qwen3-8b/
 data/h200-sft-pilot/ipc-lcpn-nojustify-qwen3-8b/
 
+data/h200-sft-pilot/ipc-lcpn-justify-qwen3-8b-v2/
+data/h200-sft-pilot/ipc-lcpn-nojustify-qwen3-8b-v2/
+
+
 # Mode 1 faithfulness run outputs (regenerate via scripts/run_faithfulness_ipc.py)
 data/derived/instruction_generation_validation/*/faithfulness/
 
