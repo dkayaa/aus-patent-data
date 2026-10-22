@@ -2,6 +2,9 @@
 
 # These can be configured to any value required.
 stop_token: "<STOP>"
+# Empty leaves the menu as children plus <STOP>. Set to "<BACK>" to match
+# v2 training hops: return to the parent, offered everywhere except <ROOT>.
+back_token: ""
 root_label: "<ROOT>"
 
 # Patent fields to include in each hop

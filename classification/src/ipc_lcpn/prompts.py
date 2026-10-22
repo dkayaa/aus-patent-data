@@ -5,22 +5,39 @@ from __future__ import annotations
 from ipc.accessor import IPCNode
 
 # Kept close to instruction-generation/src/tasks/ipc_lcpn.py wording.
-def _instruction_label(stop_token: str) -> str:
+def _instruction_label(stop_token: str, back_token: str = "") -> str:
+    if not back_token:
+        return (
+            "Select the IPC symbol that correctly continues the classification "
+            "from the current place, or "
+            f"{stop_token} if none of the children fit. "
+            f"Answer with the symbol or {stop_token} only."
+        )
     return (
         "Select the IPC symbol that correctly continues the classification "
-        "from the current place, or "
-        f"{stop_token} if none of the children fit. "
-        f"Answer with the symbol or {stop_token} only."
+        "from the current place, "
+        f"{stop_token} if none of the children fit, or "
+        f"{back_token} to return to the parent. "
+        f"Answer with the symbol, {stop_token}, or {back_token} only."
     )
 
 
-def _instruction_justify(stop_token: str) -> str:
+def _instruction_justify(stop_token: str, back_token: str = "") -> str:
+    if not back_token:
+        return (
+            "Select the IPC symbol that correctly continues the classification "
+            "from the current place, or "
+            f"{stop_token} if none of the children fit. "
+            "Write a short justification grounded in the patent text, then a line "
+            f"of the form Classification: <IPC symbol or {stop_token}>."
+        )
     return (
         "Select the IPC symbol that correctly continues the classification "
-        "from the current place, or "
-        f"{stop_token} if none of the children fit. "
+        "from the current place, "
+        f"{stop_token} if none of the children fit, or "
+        f"{back_token} to return to the parent. "
         "Write a short justification grounded in the patent text, then a line "
-        f"of the form Classification: <IPC symbol or {stop_token}>."
+        f"of the form Classification: <IPC symbol, {stop_token}, or {back_token}>."
     )
 
 SYSTEM_PROMPT = (
@@ -28,8 +45,13 @@ SYSTEM_PROMPT = (
     "Classify one IPC step at a time."
 )
 
-# Numbered child list, with STOP as the last option.
-def choice_lines(children: list[IPCNode], *, stop_token: str) -> str:
+# Numbered child list, with STOP as the last option, then BACK when offered.
+def choice_lines(
+    children: list[IPCNode],
+    *,
+    stop_token: str,
+    back_token: str = "",
+) -> str:
     lines = [
         f"{index}. {child.node_id} - {child.title}"
         for index, child in enumerate(children, start=1)
@@ -38,6 +60,8 @@ def choice_lines(children: list[IPCNode], *, stop_token: str) -> str:
         f"{len(children) + 1}. {stop_token} - none of these children; "
         "remain at the current place"
     )
+    if back_token:
+        lines.append(f"{len(children) + 2}. {back_token} - return to the parent")
     return "\n".join(lines)
 
 # Join ancestor titles with ' > '.
@@ -70,9 +94,12 @@ def build_hop_messages(
     children: list[IPCNode],
     stop_token: str,
     justify: bool,
+    back_token: str = "",
 ) -> list[dict[str, str]]:
     instruction = (
-        _instruction_justify(stop_token) if justify else _instruction_label(stop_token)
+        _instruction_justify(stop_token, back_token)
+        if justify
+        else _instruction_label(stop_token, back_token)
     )
     blocks: list[str] = [instruction, ""]
     if document:
@@ -81,7 +108,9 @@ def build_hop_messages(
     blocks.append(f"Current node: {current_id}")
     blocks.append(f"Titles: {titles}")
     blocks.append("")
-    blocks.append(f"Children:\n{choice_lines(children, stop_token=stop_token)}")
+    blocks.append(
+        f"Children:\n{choice_lines(children, stop_token=stop_token, back_token=back_token)}"
+    )
     user = "\n".join(blocks).strip()
     return [
         {"role": "system", "content": SYSTEM_PROMPT},

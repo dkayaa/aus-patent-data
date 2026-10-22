@@ -18,6 +18,7 @@ class ParsedHop:
     justification: str
     choice: str
     is_stop: bool
+    is_back: bool = False
 
 
 def _norm_choice(text: str) -> str:
@@ -32,6 +33,7 @@ def parse_hop_response(
     allowed_codes: set[str],
     stop_token: str,
     justify: bool = True,
+    back_token: str = "",
 ) -> ParsedHop:
   
     raw = (text or "").strip()
@@ -39,6 +41,7 @@ def parse_hop_response(
         raise HopParseError("empty model response")
 
     stop_norm = _norm_choice(stop_token)
+    back_norm = _norm_choice(back_token) if back_token else ""
     allowed_norm = {_norm_choice(code): code for code in allowed_codes}
 
     if justify:
@@ -63,6 +66,14 @@ def parse_hop_response(
             is_stop=True,
         )
 
+    if back_norm and choice_norm == back_norm:
+        return ParsedHop(
+            justification=justification,
+            choice=back_token,
+            is_stop=False,
+            is_back=True,
+        )
+
     if choice_norm in allowed_norm:
         return ParsedHop(
             justification=justification,
@@ -70,6 +81,10 @@ def parse_hop_response(
             is_stop=False,
         )
 
+    if back_token:
+        raise HopParseError(
+            f"choice {choice_raw!r} is not STOP, not BACK, and not in the child menu"
+        )
     raise HopParseError(
         f"choice {choice_raw!r} is not STOP and not in the child menu"
     )

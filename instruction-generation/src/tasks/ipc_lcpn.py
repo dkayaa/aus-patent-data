@@ -1,11 +1,18 @@
 """Hop-wise IPC multiple choice along the office primary-IPC path.
 
-A primary symbol N places deep (section = 1) yields one record per edge
-from each ancestor to the next place on the path. The gold child is the
-next place on that path. When the primary place itself has children, one
-further record is written there: the menu is those children, and the gold
-choice is the stop token. A primary place with no children is a leaf; the
-walk ends without asking, so no stop record is written.
+The first on-path record is at ``<ROOT>``: the menu is the sections, and
+the gold choice is the section on the office path. Each later edge from an
+ancestor to the next place is one record. The gold child is the next place
+on that path. When the primary place itself has children, one further
+record is written there: the menu is those children, and the gold choice is
+the stop token. A primary place with no children is a leaf; the walk ends
+without asking, so no stop record is written.
+
+When ``back_token`` is set, every on-path menu except ``<ROOT>`` also offers
+that token, and one extra record is appended per on-path step: the current
+place is the first scheme-order child that is not the gold child, and the
+gold choice is ``back_token``. Those rows follow the on-path rows and do not
+change on-path hop indexes.
 
 When ``justify`` is true (the default), the teacher writes a short
 justification for that gold child. The student input does not contain the
@@ -18,9 +25,11 @@ symbol only and the teacher is not called.
 - ``include_abstract`` (default true): omit the abstract when false
 - ``claims``: ``claim_1`` (default) or ``omit``
 - ``justify`` (default true): teacher justification before the symbol
-- ``stop_token`` (default ``<STOP>``): last menu option. Gold on a path
-  edge is the next place. Gold at the primary place, when it has children,
+- ``stop_token`` (default ``<STOP>``): last menu option on a path edge's
+  gold is the next place. Gold at the primary place, when it has children,
   is this token.
+- ``back_token`` (default empty): when set, offer this token to return to
+  the parent, and write the off-path gold-back rows. Empty keeps those off.
 """
 
 from __future__ import annotations
@@ -46,22 +55,42 @@ if str(_IPC_ROOT) not in sys.path:
 
 from ipc.accessor import IPCAccessor, IPCNode  # noqa: E402
 
-def _instruction_label(stop_token: str) -> str:
+ROOT_LABEL = "<ROOT>"
+
+
+def _instruction_label(stop_token: str, back_token: str = "") -> str:
+    if not back_token:
+        return (
+            "Select the IPC symbol that correctly continues the classification "
+            "from the current place, or "
+            f"{stop_token} if none of the children fit. "
+            f"Answer with the symbol or {stop_token} only."
+        )
     return (
         "Select the IPC symbol that correctly continues the classification "
-        "from the current place, or "
-        f"{stop_token} if none of the children fit. "
-        f"Answer with the symbol or {stop_token} only."
+        "from the current place, "
+        f"{stop_token} if none of the children fit, or "
+        f"{back_token} to return to the parent. "
+        f"Answer with the symbol, {stop_token}, or {back_token} only."
     )
 
 
-def _instruction_justify(stop_token: str) -> str:
+def _instruction_justify(stop_token: str, back_token: str = "") -> str:
+    if not back_token:
+        return (
+            "Select the IPC symbol that correctly continues the classification "
+            "from the current place, or "
+            f"{stop_token} if none of the children fit. "
+            "Write a short justification grounded in the patent text, then a line "
+            f"of the form Classification: <IPC symbol or {stop_token}>."
+        )
     return (
         "Select the IPC symbol that correctly continues the classification "
-        "from the current place, or "
-        f"{stop_token} if none of the children fit. "
+        "from the current place, "
+        f"{stop_token} if none of the children fit, or "
+        f"{back_token} to return to the parent. "
         "Write a short justification grounded in the patent text, then a line "
-        f"of the form Classification: <IPC symbol or {stop_token}>."
+        f"of the form Classification: <IPC symbol, {stop_token}, or {back_token}>."
     )
 
 
@@ -72,6 +101,10 @@ TEACHER_TRAILER = """Write a short justification (about 40–90 words) that maps
 Use only the supplied patent text and that title. Do not mention the other choices or any other IPC symbol. Do not write a Classification line. Respond with the justification only."""
 
 TEACHER_TRAILER_STOP = """Write a short justification (about 40–90 words) that explains why this patent is covered by the current place and should remain there rather than move to a more specific child.
+
+Use only the supplied patent text and the current place's title. Do not mention the other choices or any other IPC symbol. Do not write a Classification line. Respond with the justification only."""
+
+TEACHER_TRAILER_BACK = """Write a short justification (about 40–90 words) that explains why this patent is not covered by the current place and should return to the parent.
 
 Use only the supplied patent text and the current place's title. Do not mention the other choices or any other IPC symbol. Do not write a Classification line. Respond with the justification only."""
 
@@ -133,7 +166,12 @@ def _title_path(nodes: list[IPCNode]) -> str:
     return " > ".join(parts)
 
 
-def _choice_lines(children: list[IPCNode], *, stop_token: str) -> str:
+def _choice_lines(
+    children: list[IPCNode],
+    *,
+    stop_token: str,
+    back_token: str = "",
+) -> str:
     lines = [
         f"{index}. {child.node_id} - {child.title}"
         for index, child in enumerate(children, start=1)
@@ -142,7 +180,25 @@ def _choice_lines(children: list[IPCNode], *, stop_token: str) -> str:
         f"{len(children) + 1}. {stop_token} - none of these children; "
         "remain at the current place"
     )
+    if back_token:
+        lines.append(f"{len(children) + 2}. {back_token} - return to the parent")
     return "\n".join(lines)
+
+
+def _wrong_child(
+    children: list[IPCNode],
+    gold_id: str,
+    *,
+    is_stop: bool,
+) -> IPCNode | None:
+    """First scheme-order child that is not the gold step.
+
+    A stop hop has no gold child, so the first child is the wrong step.
+    """
+    for child in children:
+        if is_stop or child.node_id != gold_id:
+            return child
+    return None
 
 
 def _as_bool(value: Any, default: bool) -> bool:
@@ -206,52 +262,56 @@ class IPCLCPNTask(Task):
             return None
 
         stop_token = self._stop_token()
-        hops: list[tuple[IPCNode, str, list[IPCNode], bool]] = []
-        for index in range(len(path) - 1):
-            now = path[index]
-            gold = path[index + 1]
-            children = self._accessor.get_children(now.node_id)
-            if not any(child.node_id == gold.node_id for child in children):
-                return None
-            hops.append((now, gold.node_id, children, False))
-        final = path[-1]
-        final_children = self._accessor.get_children(final.node_id)
-        if final_children:
-            hops.append((final, stop_token, final_children, True))
+        back_token = self._back_token()
+        steps = self._on_path_steps(path, stop_token=stop_token, back_token=back_token)
+        if steps is None:
+            return None
+        if back_token:
+            steps.extend(self._back_steps(steps, back_token=back_token))
 
         document = self._document(patent)
         claims_mode = self._claims_mode()
         include_abstract = self._include_abstract()
         justify = self._justify()
         records: list[dict[str, Any]] = []
-        n_hops = len(hops)
-        for index, (now, gold_id, children, is_stop) in enumerate(hops):
-            ancestors = path if is_stop else path[: index + 1]
-            titles = _title_path(ancestors)
-            choice_lines = _choice_lines(children, stop_token=stop_token)
+        n_hops = len(steps)
+        path_node_ids = [ROOT_LABEL, *[node.node_id for node in path]]
+        for index, step in enumerate(steps):
+            menu_back = back_token if step["offer_back"] else ""
+            titles = step["titles"]
+            choice_lines = _choice_lines(
+                step["children"],
+                stop_token=stop_token,
+                back_token=menu_back,
+            )
             blocks: list[str] = []
             if document:
                 blocks.append(document)
-            blocks.append(f"Current node: {now.node_id}\nTitles: {titles}")
+            blocks.append(f"Current node: {step['now_id']}\nTitles: {titles}")
             blocks.append(f"Children:\n{choice_lines}")
             input_text = "\n\n".join(blocks)
             fitted = None
             if justify:
                 justification, fitted = self._justify_hop(
                     patent,
-                    now=now,
-                    gold_id=gold_id,
-                    gold_title="" if is_stop else self._child_title(children, gold_id),
+                    now_id=step["now_id"],
+                    now_title=step["now_title"],
+                    gold_id=step["gold_id"],
+                    gold_title=step["gold_title"],
                     titles=titles,
                     choice_lines=choice_lines,
                     stop_token=stop_token,
-                    is_stop=is_stop,
+                    back_token=back_token,
+                    is_stop=step["is_stop"],
+                    is_back=step["is_back"],
+                    parent_id=step["parent_id"],
+                    parent_title=step["parent_title"],
                 )
-                output_text = f"{justification}\nClassification: {gold_id}"
-                instruction = _instruction_justify(stop_token)
+                output_text = f"{justification}\nClassification: {step['gold_id']}"
+                instruction = _instruction_justify(stop_token, menu_back)
             else:
-                output_text = gold_id
-                instruction = _instruction_label(stop_token)
+                output_text = step["gold_id"]
+                instruction = _instruction_label(stop_token, menu_back)
             extra: dict[str, Any] = {}
             if fitted is not None:
                 extra.update(self._fit_meta(fitted))
@@ -261,45 +321,157 @@ class IPCLCPNTask(Task):
                     instruction=instruction,
                     input_text=input_text,
                     output_text=output_text,
-                    now_node_id=now.node_id,
-                    gold_node_id=gold_id,
-                    is_stop=is_stop,
+                    now_node_id=step["now_id"],
+                    gold_node_id=step["gold_id"],
+                    is_stop=step["is_stop"],
+                    is_back=step["is_back"],
+                    parent_node_id=step["parent_id"],
                     hop_index=index,
                     n_hops=n_hops,
                     depth=len(path),
-                    path_node_ids=[node.node_id for node in path],
+                    path_node_ids=path_node_ids,
                     include_abstract=include_abstract,
                     claims=claims_mode,
                     justify=justify,
                     stop_token=stop_token,
+                    back_token=back_token,
                     filed_date=patent.filed_date or None,
                     **extra,
                 )
             )
         return records
 
-    def _child_title(self, children: list[IPCNode], gold_id: str) -> str:
-        for child in children:
-            if child.node_id == gold_id:
-                return child.title
-        return ""
+    def _on_path_steps(
+        self,
+        path: list[IPCNode],
+        *,
+        stop_token: str,
+        back_token: str,
+    ) -> list[dict[str, Any]] | None:
+        assert self._accessor is not None
+        root_children = self._accessor.get_children("")
+        if not any(child.node_id == path[0].node_id for child in root_children):
+            return None
+        steps: list[dict[str, Any]] = [
+            {
+                "now_id": ROOT_LABEL,
+                "now_title": ROOT_LABEL,
+                "gold_id": path[0].node_id,
+                "gold_title": path[0].title,
+                "children": root_children,
+                "is_stop": False,
+                "is_back": False,
+                "parent_id": "",
+                "parent_title": "",
+                "offer_back": False,
+                "titles": ROOT_LABEL,
+            }
+        ]
+        for index in range(len(path) - 1):
+            now = path[index]
+            gold = path[index + 1]
+            children = self._accessor.get_children(now.node_id)
+            if not any(child.node_id == gold.node_id for child in children):
+                return None
+            parent = path[index - 1] if index else None
+            steps.append(
+                {
+                    "now_id": now.node_id,
+                    "now_title": now.title,
+                    "gold_id": gold.node_id,
+                    "gold_title": gold.title,
+                    "children": children,
+                    "is_stop": False,
+                    "is_back": False,
+                    "parent_id": ROOT_LABEL if parent is None else parent.node_id,
+                    "parent_title": ROOT_LABEL if parent is None else parent.title,
+                    "offer_back": bool(back_token),
+                    "titles": _title_path(path[: index + 1]),
+                }
+            )
+        final = path[-1]
+        final_children = self._accessor.get_children(final.node_id)
+        if final_children:
+            parent = path[-2]
+            steps.append(
+                {
+                    "now_id": final.node_id,
+                    "now_title": final.title,
+                    "gold_id": stop_token,
+                    "gold_title": "",
+                    "children": final_children,
+                    "is_stop": True,
+                    "is_back": False,
+                    "parent_id": parent.node_id,
+                    "parent_title": parent.title,
+                    "offer_back": bool(back_token),
+                    "titles": _title_path(path),
+                }
+            )
+        return steps
+
+    def _back_steps(
+        self,
+        on_path: list[dict[str, Any]],
+        *,
+        back_token: str,
+    ) -> list[dict[str, Any]]:
+        assert self._accessor is not None
+        extra: list[dict[str, Any]] = []
+        for step in on_path:
+            wrong = _wrong_child(
+                step["children"],
+                step["gold_id"],
+                is_stop=step["is_stop"],
+            )
+            if wrong is None:
+                continue
+            title = wrong.title.strip() or wrong.node_id
+            extra.append(
+                {
+                    "now_id": wrong.node_id,
+                    "now_title": wrong.title,
+                    "gold_id": back_token,
+                    "gold_title": "",
+                    "children": self._accessor.get_children(wrong.node_id),
+                    "is_stop": False,
+                    "is_back": True,
+                    "parent_id": step["now_id"],
+                    "parent_title": step["now_title"],
+                    "offer_back": True,
+                    "titles": f"{step['titles']} > {title}",
+                }
+            )
+        return extra
 
     def _justify_hop(
         self,
         patent: PatentText,
         *,
-        now: IPCNode,
+        now_id: str,
+        now_title: str,
         gold_id: str,
         gold_title: str,
         titles: str,
         choice_lines: str,
         stop_token: str,
+        back_token: str,
         is_stop: bool,
+        is_back: bool,
+        parent_id: str,
+        parent_title: str,
     ) -> tuple[str, Any]:
-        if is_stop:
+        if is_back:
+            header = [
+                f"The correct choice is {back_token}.",
+                f"Return to the parent place {parent_id} ({parent_title}).",
+                f"Do not choose a child symbol or {stop_token}.",
+            ]
+            trailer = TEACHER_TRAILER_BACK
+        elif is_stop:
             header = [
                 f"The correct choice is {stop_token}.",
-                f"Remain at the current place {now.node_id} ({now.title}).",
+                f"Remain at the current place {now_id} ({now_title}).",
                 "Do not choose a child symbol.",
             ]
             trailer = TEACHER_TRAILER_STOP
@@ -310,7 +482,7 @@ class IPCLCPNTask(Task):
             ]
             trailer = TEACHER_TRAILER
         body = [
-            f"Current node: {now.node_id}",
+            f"Current node: {now_id}",
             f"Titles: {titles}",
             "",
             f"Children:\n{choice_lines}",
@@ -374,6 +546,12 @@ class IPCLCPNTask(Task):
         if not token:
             raise ValueError("tasks.ipc_lcpn.stop_token must be a non-empty string")
         return token
+
+    def _back_token(self) -> str:
+        raw = self.options.get("back_token")
+        if raw is None:
+            return ""
+        return str(raw).strip()
 
     def _claims_mode(self) -> str:
         mode = str(self.options.get("claims", _CLAIMS_CLAIM_1)).strip().lower()

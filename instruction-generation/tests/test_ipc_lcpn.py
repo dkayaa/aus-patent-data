@@ -94,18 +94,22 @@ class IPCLCPNTests(unittest.TestCase):
     def test_depth_yields_one_fewer_hops(self) -> None:
         records = self._task().generate(_patent())
         assert records is not None
-        self.assertEqual(len(records), 4)
+        self.assertEqual(len(records), 5)
         self.assertEqual(
             [record["output"] for record in records],
-            ["A01", "A01B", "A01B1/00", "A01B1/02"],
+            ["A", "A01", "A01B", "A01B1/00", "A01B1/02"],
         )
+        self.assertEqual(records[0]["meta"]["now_node_id"], "<ROOT>")
+        self.assertEqual(records[0]["meta"]["gold_node_id"], "A")
+        self.assertEqual(records[0]["meta"]["path_node_ids"][0], "<ROOT>")
         self.assertEqual(records[0]["meta"]["depth"], 5)
-        self.assertEqual(records[0]["meta"]["n_hops"], 4)
+        self.assertEqual(records[0]["meta"]["n_hops"], 5)
+        self.assertFalse(records[0]["meta"]["is_back"])
         self.assertEqual(
-            records[2]["input"].split("Titles: ", 1)[1].split("\n", 1)[0],
+            records[3]["input"].split("Titles: ", 1)[1].split("\n", 1)[0],
             "HUMAN > AGRI > SOIL",
         )
-        menu = records[2]["input"]
+        menu = records[3]["input"]
         self.assertIn("1. A01B1/00 - HAND", menu)
         self.assertIn("2. A01B3/00 - PLOUGHS", menu)
         self.assertIn(
@@ -113,7 +117,9 @@ class IPCLCPNTests(unittest.TestCase):
             menu,
         )
         self.assertNotIn("A01C", menu)
+        self.assertNotIn("<BACK>", records[0]["input"])
         self.assertEqual(records[0]["meta"]["stop_token"], "<STOP>")
+        self.assertEqual(records[0]["meta"]["back_token"], "")
         self.assertFalse(records[-1]["meta"]["is_stop"])
         self.assertEqual(records[0]["meta"]["filed_date"], "2020-03-15")
         self.assertEqual(records[-1]["meta"]["filed_date"], "2020-03-15")
@@ -124,14 +130,14 @@ class IPCLCPNTests(unittest.TestCase):
         assert records is not None
         self.assertEqual(
             [record["output"] for record in records],
-            ["A01", "A01B", "A01B1/00", "<STOP>"],
+            ["A", "A01", "A01B", "A01B1/00", "<STOP>"],
         )
         stop = records[-1]
         self.assertTrue(stop["meta"]["is_stop"])
         self.assertEqual(stop["meta"]["now_node_id"], "A01B1/00")
         self.assertEqual(stop["meta"]["gold_node_id"], "<STOP>")
-        self.assertEqual(stop["meta"]["hop_index"], 3)
-        self.assertEqual(stop["meta"]["n_hops"], 4)
+        self.assertEqual(stop["meta"]["hop_index"], 4)
+        self.assertEqual(stop["meta"]["n_hops"], 5)
         self.assertEqual(stop["meta"]["depth"], 4)
         self.assertIn("Current node: A01B1/00", stop["input"])
         self.assertIn("1. A01B1/02 - SPADES", stop["input"])
@@ -150,11 +156,11 @@ class IPCLCPNTests(unittest.TestCase):
         assert records is not None
         self.assertIn(
             "3. HALT - none of these children; remain at the current place",
-            records[2]["input"],
+            records[3]["input"],
         )
-        self.assertNotIn("STOP", records[2]["input"])
+        self.assertNotIn("STOP", records[3]["input"])
         self.assertIn("or HALT only", records[0]["instruction"])
-        self.assertEqual(records[0]["output"], "A01")
+        self.assertEqual(records[0]["output"], "A")
 
     def test_abstract_and_claim_switches(self) -> None:
         both = self._task(include_abstract=True, claims="claim_1").generate(_patent())
@@ -167,7 +173,7 @@ class IPCLCPNTests(unittest.TestCase):
         assert neither is not None
         self.assertNotIn("ABSTRACT_TEXT", neither[0]["input"])
         self.assertNotIn("CLAIM_ONE", neither[0]["input"])
-        self.assertIn("Current node: A", neither[0]["input"])
+        self.assertIn("Current node: <ROOT>", neither[0]["input"])
 
     def test_section_and_unknown_are_skipped(self) -> None:
         task = self._task()
@@ -211,13 +217,13 @@ class IPCLCPNTests(unittest.TestCase):
         task._accessor = self.accessor
         records = task.generate(_patent())
         assert records is not None
-        self.assertEqual(len(seen), 4)
-        self.assertIn("The correct next IPC symbol is A01 (AGRI).", seen[0])
+        self.assertEqual(len(seen), 5)
+        self.assertIn("The correct next IPC symbol is A (HUMAN).", seen[0])
         self.assertNotIn("The correct next IPC symbol", records[0]["input"])
         self.assertEqual(
             records[0]["output"],
             "The composition integrates an exogenous sequence into a cell.\n"
-            "Classification: A01",
+            "Classification: A",
         )
         self.assertTrue(records[0]["meta"]["justify"])
         self.assertIn("Classification:", records[0]["instruction"])
@@ -239,7 +245,7 @@ class IPCLCPNTests(unittest.TestCase):
         task._accessor = self.accessor
         records = task.generate(_patent(primary_ipc="A01B1/00"))
         assert records is not None
-        self.assertEqual(len(seen), 4)
+        self.assertEqual(len(seen), 5)
         self.assertIn("The correct choice is <STOP>.", seen[-1])
         self.assertIn("Remain at the current place A01B1/00 (HAND).", seen[-1])
         self.assertNotIn("The correct choice is <STOP>.", records[-1]["input"])
@@ -247,6 +253,65 @@ class IPCLCPNTests(unittest.TestCase):
             records[-1]["output"],
             "The disclosure is already covered by the current place.\n"
             "Classification: <STOP>",
+        )
+
+    def test_back_token_adds_root_menu_and_one_wrong_child(self) -> None:
+        records = self._task(back_token="<BACK>").generate(_patent())
+        assert records is not None
+        on_path = [record for record in records if not record["meta"]["is_back"]]
+        backs = [record for record in records if record["meta"]["is_back"]]
+        self.assertEqual(
+            [record["output"] for record in on_path],
+            ["A", "A01", "A01B", "A01B1/00", "A01B1/02"],
+        )
+        self.assertNotIn("<BACK>", records[0]["input"])
+        self.assertNotIn("<BACK>", records[0]["instruction"])
+        section = on_path[1]
+        self.assertIn("3. <BACK> - return to the parent", section["input"])
+        self.assertEqual(section["output"], "A01")
+        self.assertEqual(section["meta"]["parent_node_id"], "<ROOT>")
+        self.assertEqual(
+            [record["meta"]["now_node_id"] for record in backs],
+            ["A01C", "A01B3/00", "A01B1/20"],
+        )
+        self.assertTrue(all(record["output"] == "<BACK>" for record in backs))
+        self.assertEqual(backs[0]["meta"]["parent_node_id"], "A01")
+        self.assertEqual(backs[0]["meta"]["gold_node_id"], "<BACK>")
+        self.assertEqual(backs[0]["meta"]["hop_index"], len(on_path))
+        self.assertIn("Current node: A01C", backs[0]["input"])
+        leaf_menu = backs[0]["input"].split("Children:\n", 1)[1]
+        self.assertTrue(leaf_menu.startswith("1. <STOP>"))
+        self.assertIn("2. <BACK> - return to the parent", leaf_menu)
+        self.assertNotIn("A01B", leaf_menu)
+
+    def test_back_hop_justification(self) -> None:
+        seen: list[str] = []
+
+        class _Client:
+            config = SimpleNamespace(model="teacher", provider="fake")
+
+            def chat(self, messages: list[dict[str, str]], **_kwargs: object) -> str:
+                seen.append(messages[-1]["content"])
+                return "The current place does not cover the claim."
+
+        task = IPCLCPNTask(
+            _Client(),  # type: ignore[arg-type]
+            options={
+                "justify": True,
+                "claims": "omit",
+                "include_abstract": False,
+                "back_token": "<BACK>",
+            },
+        )
+        task._accessor = self.accessor
+        records = task.generate(_patent())
+        assert records is not None
+        backs = [record for record in records if record["meta"]["is_back"]]
+        self.assertIn("The correct choice is <BACK>.", seen[-len(backs)])
+        self.assertIn("Return to the parent place A01 (AGRI).", seen[-len(backs)])
+        self.assertEqual(
+            backs[0]["output"],
+            "The current place does not cover the claim.\nClassification: <BACK>",
         )
 
 

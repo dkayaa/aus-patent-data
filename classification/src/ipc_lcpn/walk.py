@@ -53,21 +53,29 @@ def walk_ipc(
     # Empty id "" means root in IPCAccessor; children are sections A-H.
     now_id = ""
     ancestor_labels = [cfg.root_label]
+    # Child left by the previous <BACK>, hidden on the next menu only.
+    skip_child = ""
 
     for _ in range(cfg.max_hops):
         try:
-            children: list[IPCNode] = accessor.get_children(now_id)
+            all_children: list[IPCNode] = accessor.get_children(now_id)
         except KeyError:
             result.stop_reason = "unknown_node"
             return result
 
+        children = all_children
+        if skip_child:
+            children = [child for child in children if child.node_id != skip_child]
+            skip_child = ""
+
         display_now = cfg.root_label if now_id == "" else now_id
         titles = title_path(ancestor_labels)
 
-        if not children:
+        if not all_children:
             result.stop_reason = "leaf"
             return result
 
+        offer_back = cfg.back_token if now_id else ""
         messages = build_hop_messages(
             document=document,
             current_id=display_now,
@@ -75,6 +83,7 @@ def walk_ipc(
             children=children,
             stop_token=cfg.stop_token,
             justify=cfg.justify,
+            back_token=offer_back,
         )
         raw = client.chat(messages)
         allowed = {child.node_id for child in children}
@@ -84,6 +93,7 @@ def walk_ipc(
                 allowed_codes=allowed,
                 stop_token=cfg.stop_token,
                 justify=cfg.justify,
+                back_token=offer_back,
             )
         except HopParseError as exc:
             result.stop_reason = f"parse_error: {exc}"
@@ -111,6 +121,21 @@ def walk_ipc(
         if parsed.is_stop:
             result.stop_reason = "stop"
             return result
+
+        if parsed.is_back:
+            if not now_id:
+                result.stop_reason = "back_at_root"
+                return result
+            left = now_id
+            parents = accessor.get_parent(now_id)
+            parent_id = parents[0].node_id if parents else ""
+            if len(ancestor_labels) > 1:
+                ancestor_labels.pop()
+            if result.path and result.path[-1] == left:
+                result.path.pop()
+            now_id = parent_id
+            skip_child = left
+            continue
 
         result.path.append(parsed.choice)
         now_id = parsed.choice

@@ -2,7 +2,9 @@
 
 IPC LCPN hop JSONL under this directory. Each row is one hop: claim 1, the current IPC place, its children, and the gold choice. `_pools/`, `_samples/`, and `_archive/` are not these runs.
 
-None of these runs includes a `<ROOT>` hop. Hop 0 starts at the section (`A`–`H`) and the gold is the class. The first group (`…/00`) is the gold at hop 2, under the subclass.
+Version 1 has no `<ROOT>` hop. Hop 0 starts at the section (`A`–`H`) and the gold is the class. The first group (`…/00`) is the gold at hop 2, under the subclass.
+
+Version 2 adds that missing hop, so hop 0 is `<ROOT>` and the gold is the section. The first group is then the gold at hop 3. Every later menu also offers `<BACK>`. On the office path the gold is still the next child or `<STOP>`. After those rows, each office step has one extra hop whose current place is a wrong child and whose gold is `<BACK>`. Those rows have `meta.is_back: true` and do not change the on-path hop index.
 
 ## `qwen-qwen3-235b-a22b-2507_claim1_nojustify_pilot_2000_v1`
 

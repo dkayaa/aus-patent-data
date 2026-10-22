@@ -70,7 +70,12 @@ def hop_messages(record: dict[str, Any]) -> list[dict[str, str]]:
     return [{"role": "user", "content": user}]
 
 
-def menu_codes(input_text: str, *, stop_token: str) -> set[str]:
+def menu_codes(
+    input_text: str,
+    *,
+    stop_token: str,
+    back_token: str = "",
+) -> set[str]:
     codes: set[str] = set()
     in_children = False
     for line in input_text.splitlines():
@@ -80,7 +85,7 @@ def menu_codes(input_text: str, *, stop_token: str) -> set[str]:
         if not in_children or ". " not in line or " - " not in line:
             continue
         code = line.split(". ", 1)[1].split(" - ", 1)[0].strip()
-        if code and code != stop_token:
+        if code and code != stop_token and code != back_token:
             codes.add(code)
     return codes
 
@@ -101,6 +106,13 @@ def _record_stop_token(record: dict[str, Any], cfg: IPCLCPNConfig) -> str:
     return cfg.stop_token
 
 
+def _record_back_token(record: dict[str, Any], cfg: IPCLCPNConfig) -> str:
+    meta = record.get("meta")
+    if isinstance(meta, dict) and "back_token" in meta:
+        return str(meta.get("back_token") or "").strip()
+    return cfg.back_token
+
+
 def score_hops(
     records: list[dict[str, Any]],
     *,
@@ -113,8 +125,13 @@ def score_hops(
         meta = record.get("meta") if isinstance(record.get("meta"), dict) else {}
         gold = str(meta.get("gold_node_id") or "").strip()
         stop_token = _record_stop_token(record, cfg)
+        back_token = _record_back_token(record, cfg)
         justify = _record_justify(record, cfg)
-        allowed = menu_codes(str(record.get("input") or ""), stop_token=stop_token)
+        allowed = menu_codes(
+            str(record.get("input") or ""),
+            stop_token=stop_token,
+            back_token=back_token,
+        )
         raw = client.chat(hop_messages(record))
         choice = ""
         error = ""
@@ -125,6 +142,7 @@ def score_hops(
                 allowed_codes=allowed,
                 stop_token=stop_token,
                 justify=justify,
+                back_token=back_token,
             )
             choice = parsed.choice
             correct = bool(gold) and choice == gold

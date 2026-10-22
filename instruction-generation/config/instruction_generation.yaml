@@ -48,6 +48,10 @@ tasks:
     # Last row of every child menu. On a path edge, gold is the next place.
     # At the primary place, when it still has children, gold is this token.
     stop_token: "<STOP>"
+    # When set, every menu except <ROOT> also offers this token, and each
+    # on-path step gains one off-path row whose gold choice is this token.
+    # Empty disables both.
+    back_token: "<BACK>"
 
 run:
   # Records per output shard part-NNNNN.jsonl.gz

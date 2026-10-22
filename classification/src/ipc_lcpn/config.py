@@ -19,6 +19,7 @@ _MODES = frozenset({"walk", "hops"})
 @dataclass(frozen=True)
 class IPCLCPNConfig:
     stop_token: str
+    back_token: str
     root_label: str
     include_abstract: bool
     claims: str
@@ -70,8 +71,14 @@ def load_config(path: Path | None = None) -> IPCLCPNConfig:
     paths = dict(raw.get("paths") or {})
     output_dir = resolve_path(paths.get("output_dir") or "data/derived/ipc_lcpn")
 
+    back_raw = raw.get("back_token")
+    back_token = "" if back_raw is None else str(back_raw).strip()
+    if back_token.lower() in {"null", "none"}:
+        back_token = ""
+
     return IPCLCPNConfig(
         stop_token=str(raw.get("stop_token") or "<STOP>").strip() or "<STOP>",
+        back_token=back_token,
         root_label=str(raw.get("root_label") or "<ROOT>").strip() or "<ROOT>",
         include_abstract=bool(raw.get("include_abstract", True)),
         claims=claims,
