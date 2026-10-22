@@ -53,8 +53,8 @@ def walk_ipc(
     # Empty id "" means root in IPCAccessor; children are sections A-H.
     now_id = ""
     ancestor_labels = [cfg.root_label]
-    # Child left by the previous <BACK>, hidden on the next menu only.
-    skip_child = ""
+    # Children left by <BACK>. They stay off later menus at this parent.
+    skipped_children: list[str] = []
 
     for _ in range(cfg.max_hops):
         try:
@@ -63,10 +63,9 @@ def walk_ipc(
             result.stop_reason = "unknown_node"
             return result
 
-        children = all_children
-        if skip_child:
-            children = [child for child in children if child.node_id != skip_child]
-            skip_child = ""
+        children = [
+            child for child in all_children if child.node_id not in skipped_children
+        ]
 
         display_now = cfg.root_label if now_id == "" else now_id
         titles = title_path(ancestor_labels)
@@ -134,7 +133,8 @@ def walk_ipc(
             if result.path and result.path[-1] == left:
                 result.path.pop()
             now_id = parent_id
-            skip_child = left
+            if left not in skipped_children:
+                skipped_children.append(left)
             continue
 
         result.path.append(parsed.choice)

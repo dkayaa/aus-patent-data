@@ -176,6 +176,45 @@ class WalkMockTests(unittest.TestCase):
         self.assertIn("<STOP>", codes)
         self.assertNotIn("<BACK>", codes)
 
+    def test_back_hides_every_child_left(self) -> None:
+        replies = [
+            "Classification: A\n",
+            "Classification: <BACK>\n",
+            "Classification: B\n",
+            "Classification: <BACK>\n",
+            "Classification: <STOP>\n",
+        ]
+        seen: list[str] = []
+
+        class Scripted:
+            def __init__(self) -> None:
+                self.i = 0
+
+            def chat(self, messages, *, temperature=None, max_tokens=None):
+                seen.append(messages[-1]["content"])
+                text = replies[self.i]
+                self.i += 1
+                return text
+
+        result = walk_ipc(
+            accessor=self.accessor,
+            client=Scripted(),
+            cfg=replace(self.cfg, back_token="<BACK>"),
+            abstract="A farming tool.",
+            claim_1="A spade.",
+        )
+        self.assertEqual(result.path, [])
+        self.assertEqual(result.stop_reason, "stop")
+        final_children = seen[-1].split("Children:\n", 1)[1]
+        codes = [
+            line.split(". ", 1)[1].split(" - ", 1)[0]
+            for line in final_children.splitlines()
+            if ". " in line and " - " in line
+        ]
+        self.assertNotIn("A", codes)
+        self.assertNotIn("B", codes)
+        self.assertIn("<STOP>", codes)
+
 
 def _hop(gold: str, *, justify: bool = False) -> dict:
     return {

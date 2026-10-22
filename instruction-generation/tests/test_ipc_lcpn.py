@@ -14,9 +14,9 @@ for path in (str(REPO), str(SRC)):
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from ipc.accessor import IPCAccessor  # noqa: E402
+from ipc.accessor import IPCAccessor, IPCNode  # noqa: E402
 from patents import PatentText  # noqa: E402
-from tasks.ipc_lcpn import IPCLCPNTask, _lookup  # noqa: E402
+from tasks.ipc_lcpn import IPCLCPNTask, _lookup, _wrong_child  # noqa: E402
 
 _NS = "http://www.wipo.int/classifications/ipc/masterfiles"
 
@@ -312,6 +312,29 @@ class IPCLCPNTests(unittest.TestCase):
         self.assertEqual(
             backs[0]["output"],
             "The current place does not cover the claim.\nClassification: <BACK>",
+        )
+
+    def test_wrong_child_is_shuffled_and_stable(self) -> None:
+        nodes = [
+            IPCNode(node_id=code, title=code, definition=None, kind="u", entry_type="K")
+            for code in ("B", "C", "D")
+        ]
+        picks = {
+            _wrong_child(nodes, "A", is_stop=False, seed=str(index)).node_id
+            for index in range(40)
+        }
+        self.assertEqual(picks, {"B", "C", "D"})
+        seed = "2020000001|A01|A01B"
+        self.assertEqual(
+            _wrong_child(nodes, "A", is_stop=False, seed=seed).node_id,
+            _wrong_child(nodes, "A", is_stop=False, seed=seed).node_id,
+        )
+        first = self._task(back_token="<BACK>").generate(_patent())
+        second = self._task(back_token="<BACK>").generate(_patent())
+        assert first is not None and second is not None
+        self.assertEqual(
+            [record["meta"]["now_node_id"] for record in first if record["meta"]["is_back"]],
+            [record["meta"]["now_node_id"] for record in second if record["meta"]["is_back"]],
         )
 
 

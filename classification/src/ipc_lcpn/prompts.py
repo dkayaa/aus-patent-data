@@ -5,40 +5,29 @@ from __future__ import annotations
 from ipc.accessor import IPCNode
 
 # Kept close to instruction-generation/src/tasks/ipc_lcpn.py wording.
-def _instruction_label(stop_token: str, back_token: str = "") -> str:
-    if not back_token:
-        return (
+def _instruction(stop_token: str, *, justify: bool, back_token: str = "") -> str:
+    if back_token:
+        choice = (
+            "Select the IPC symbol that correctly continues the classification "
+            "from the current place, "
+            f"{stop_token} if none of the children fit, or "
+            f"{back_token} to return to the parent. "
+        )
+        answer = f"symbol, {stop_token}, or {back_token}"
+    else:
+        choice = (
             "Select the IPC symbol that correctly continues the classification "
             "from the current place, or "
             f"{stop_token} if none of the children fit. "
-            f"Answer with the symbol or {stop_token} only."
         )
-    return (
-        "Select the IPC symbol that correctly continues the classification "
-        "from the current place, "
-        f"{stop_token} if none of the children fit, or "
-        f"{back_token} to return to the parent. "
-        f"Answer with the symbol, {stop_token}, or {back_token} only."
-    )
-
-
-def _instruction_justify(stop_token: str, back_token: str = "") -> str:
-    if not back_token:
+        answer = f"symbol or {stop_token}"
+    if justify:
         return (
-            "Select the IPC symbol that correctly continues the classification "
-            "from the current place, or "
-            f"{stop_token} if none of the children fit. "
-            "Write a short justification grounded in the patent text, then a line "
-            f"of the form Classification: <IPC symbol or {stop_token}>."
+            choice
+            + "Write a short justification grounded in the patent text, then a line "
+            + f"of the form Classification: <IPC {answer}>."
         )
-    return (
-        "Select the IPC symbol that correctly continues the classification "
-        "from the current place, "
-        f"{stop_token} if none of the children fit, or "
-        f"{back_token} to return to the parent. "
-        "Write a short justification grounded in the patent text, then a line "
-        f"of the form Classification: <IPC symbol, {stop_token}, or {back_token}>."
-    )
+    return choice + f"Answer with the {answer} only."
 
 SYSTEM_PROMPT = (
     "You are an expert Australian Patent Examiner. "
@@ -96,11 +85,7 @@ def build_hop_messages(
     justify: bool,
     back_token: str = "",
 ) -> list[dict[str, str]]:
-    instruction = (
-        _instruction_justify(stop_token, back_token)
-        if justify
-        else _instruction_label(stop_token, back_token)
-    )
+    instruction = _instruction(stop_token, justify=justify, back_token=back_token)
     blocks: list[str] = [instruction, ""]
     if document:
         blocks.append(document)

@@ -10,9 +10,10 @@ without asking, so no stop record is written.
 
 When ``back_token`` is set, every on-path menu except ``<ROOT>`` also offers
 that token, and one extra record is appended per on-path step: the current
-place is the first scheme-order child that is not the gold child, and the
-gold choice is ``back_token``. Those rows follow the on-path rows and do not
-change on-path hop indexes.
+place is one shuffled non-gold child, and the gold choice is ``back_token``.
+The shuffle is seeded by the application number and the office step, so a
+repeat of the same filing picks the same child. Those rows follow the
+on-path rows and do not change on-path hop indexes.
 
 When ``justify`` is true (the default), the teacher writes a short
 justification for that gold child. The student input does not contain the
@@ -34,6 +35,7 @@ symbol only and the teacher is not called.
 
 from __future__ import annotations
 
+import random
 import re
 import sys
 from pathlib import Path
@@ -58,40 +60,29 @@ from ipc.accessor import IPCAccessor, IPCNode  # noqa: E402
 ROOT_LABEL = "<ROOT>"
 
 
-def _instruction_label(stop_token: str, back_token: str = "") -> str:
-    if not back_token:
-        return (
+def _instruction(stop_token: str, *, justify: bool, back_token: str = "") -> str:
+    if back_token:
+        choice = (
+            "Select the IPC symbol that correctly continues the classification "
+            "from the current place, "
+            f"{stop_token} if none of the children fit, or "
+            f"{back_token} to return to the parent. "
+        )
+        answer = f"symbol, {stop_token}, or {back_token}"
+    else:
+        choice = (
             "Select the IPC symbol that correctly continues the classification "
             "from the current place, or "
             f"{stop_token} if none of the children fit. "
-            f"Answer with the symbol or {stop_token} only."
         )
-    return (
-        "Select the IPC symbol that correctly continues the classification "
-        "from the current place, "
-        f"{stop_token} if none of the children fit, or "
-        f"{back_token} to return to the parent. "
-        f"Answer with the symbol, {stop_token}, or {back_token} only."
-    )
-
-
-def _instruction_justify(stop_token: str, back_token: str = "") -> str:
-    if not back_token:
+        answer = f"symbol or {stop_token}"
+    if justify:
         return (
-            "Select the IPC symbol that correctly continues the classification "
-            "from the current place, or "
-            f"{stop_token} if none of the children fit. "
-            "Write a short justification grounded in the patent text, then a line "
-            f"of the form Classification: <IPC symbol or {stop_token}>."
+            choice
+            + "Write a short justification grounded in the patent text, then a line "
+            + f"of the form Classification: <IPC {answer}>."
         )
-    return (
-        "Select the IPC symbol that correctly continues the classification "
-        "from the current place, "
-        f"{stop_token} if none of the children fit, or "
-        f"{back_token} to return to the parent. "
-        "Write a short justification grounded in the patent text, then a line "
-        f"of the form Classification: <IPC symbol, {stop_token}, or {back_token}>."
-    )
+    return choice + f"Answer with the {answer} only."
 
 
 TEACHER_SYSTEM = "You are an expert Australian Patent Examiner."
@@ -190,15 +181,17 @@ def _wrong_child(
     gold_id: str,
     *,
     is_stop: bool,
+    seed: str,
 ) -> IPCNode | None:
-    """First scheme-order child that is not the gold step.
+    """One non-gold child, chosen by a seeded shuffle.
 
-    A stop hop has no gold child, so the first child is the wrong step.
+    A stop hop has no gold child, so every child is eligible.
     """
-    for child in children:
-        if is_stop or child.node_id != gold_id:
-            return child
-    return None
+    pool = list(children) if is_stop else [child for child in children if child.node_id != gold_id]
+    if not pool:
+        return None
+    random.Random(seed).shuffle(pool)
+    return pool[0]
 
 
 def _as_bool(value: Any, default: bool) -> bool:
@@ -267,7 +260,13 @@ class IPCLCPNTask(Task):
         if steps is None:
             return None
         if back_token:
-            steps.extend(self._back_steps(steps, back_token=back_token))
+            steps.extend(
+                self._back_steps(
+                    steps,
+                    back_token=back_token,
+                    seed=patent.application_number,
+                )
+            )
 
         document = self._document(patent)
         claims_mode = self._claims_mode()
@@ -291,6 +290,7 @@ class IPCLCPNTask(Task):
             blocks.append(f"Children:\n{choice_lines}")
             input_text = "\n\n".join(blocks)
             fitted = None
+            instruction = _instruction(stop_token, justify=justify, back_token=menu_back)
             if justify:
                 justification, fitted = self._justify_hop(
                     patent,
@@ -308,10 +308,8 @@ class IPCLCPNTask(Task):
                     parent_title=step["parent_title"],
                 )
                 output_text = f"{justification}\nClassification: {step['gold_id']}"
-                instruction = _instruction_justify(stop_token, menu_back)
             else:
                 output_text = step["gold_id"]
-                instruction = _instruction_label(stop_token, menu_back)
             extra: dict[str, Any] = {}
             if fitted is not None:
                 extra.update(self._fit_meta(fitted))
@@ -415,6 +413,7 @@ class IPCLCPNTask(Task):
         on_path: list[dict[str, Any]],
         *,
         back_token: str,
+        seed: str,
     ) -> list[dict[str, Any]]:
         assert self._accessor is not None
         extra: list[dict[str, Any]] = []
@@ -423,6 +422,7 @@ class IPCLCPNTask(Task):
                 step["children"],
                 step["gold_id"],
                 is_stop=step["is_stop"],
+                seed=f"{seed}|{step['now_id']}|{step['gold_id']}",
             )
             if wrong is None:
                 continue
