@@ -52,7 +52,9 @@ def walk_ipc(
     result = WalkResult()
     # Empty id "" means root in IPCAccessor; children are sections A-H.
     now_id = ""
-    ancestor_labels = [cfg.root_label]
+    # Titles below the root are the office ancestor titles only. Training rows
+    # reserve a leading "<ROOT> > ..." for the wrong-section <BACK> examples.
+    ancestor_labels: list[str] = []
     # Children left by <BACK>. They stay off later menus at this parent.
     skipped_children: list[str] = []
 
@@ -68,7 +70,7 @@ def walk_ipc(
         ]
 
         display_now = cfg.root_label if now_id == "" else now_id
-        titles = title_path(ancestor_labels)
+        titles = cfg.root_label if now_id == "" else title_path(ancestor_labels)
 
         if not all_children:
             result.stop_reason = "leaf"
@@ -128,7 +130,7 @@ def walk_ipc(
             left = now_id
             parents = accessor.get_parent(now_id)
             parent_id = parents[0].node_id if parents else ""
-            if len(ancestor_labels) > 1:
+            if ancestor_labels:
                 ancestor_labels.pop()
             if result.path and result.path[-1] == left:
                 result.path.pop()

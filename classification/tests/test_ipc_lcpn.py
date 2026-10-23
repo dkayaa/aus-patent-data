@@ -176,6 +176,45 @@ class WalkMockTests(unittest.TestCase):
         self.assertNotIn("A", codes)
         self.assertIn("<STOP>", codes)
         self.assertNotIn("<BACK>", codes)
+        section = self.accessor.get("A")
+        self.assertIn("Titles: <ROOT>\n", seen[0])
+        self.assertIn(f"Titles: {section.title.strip()}\n", seen[1])
+        self.assertNotIn("Titles: <ROOT> >", seen[1])
+        self.assertIn("Titles: <ROOT>\n", seen[2])
+
+    def test_deeper_titles_omit_the_root_prefix(self) -> None:
+        replies = [
+            "Classification: A\n",
+            "Classification: A01\n",
+            "Classification: <STOP>\n",
+        ]
+        seen: list[str] = []
+
+        class Scripted:
+            def __init__(self) -> None:
+                self.i = 0
+
+            def chat(self, messages, *, temperature=None, max_tokens=None):
+                seen.append(messages[-1]["content"])
+                text = replies[self.i]
+                self.i += 1
+                return text
+
+        result = walk_ipc(
+            accessor=self.accessor,
+            client=Scripted(),
+            cfg=replace(self.cfg, back_token="<BACK>"),
+            abstract="A farming tool.",
+            claim_1="A spade.",
+        )
+        section = self.accessor.get("A")
+        klass = self.accessor.get("A01")
+        self.assertEqual(result.path, ["A", "A01"])
+        self.assertIn(
+            f"Titles: {section.title.strip()} > {klass.title.strip()}\n",
+            seen[2],
+        )
+        self.assertNotIn("Titles: <ROOT> >", seen[2])
 
     def test_back_hides_every_child_left(self) -> None:
         replies = [
