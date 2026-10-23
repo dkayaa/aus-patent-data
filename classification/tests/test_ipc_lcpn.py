@@ -20,6 +20,7 @@ from ipc_lcpn.hops import hop_messages, menu_codes, score_hops  # noqa: E402
 from ipc_lcpn.parse import HopParseError, parse_hop_response  # noqa: E402
 from ipc_lcpn.prompts import build_hop_messages, choice_lines  # noqa: E402
 from ipc_lcpn.walk import walk_ipc  # noqa: E402
+from ipc_lcpn.walk_eval import filings_from_hops, patent_text, score_walks  # noqa: E402
 
 
 def _node(node_id: str, title: str, kind: str = "c") -> IPCNode:
@@ -214,6 +215,66 @@ class WalkMockTests(unittest.TestCase):
         self.assertNotIn("A", codes)
         self.assertNotIn("B", codes)
         self.assertIn("<STOP>", codes)
+
+
+class WalkEvalTests(unittest.TestCase):
+    def test_patent_text_drops_the_menu(self) -> None:
+        abstract, claim = patent_text(
+            {
+                "input": (
+                    "Abstract:\nA tool.\n\n"
+                    "Claim 1:\nA spade.\n\n"
+                    "Current node: <ROOT>\n"
+                    "Children:\n1. A - HUMAN NECESSITIES"
+                )
+            }
+        )
+        self.assertEqual(abstract, "A tool.")
+        self.assertEqual(claim, "A spade.")
+
+    def test_one_filing_per_application(self) -> None:
+        rows = [
+            {"application_number": "1", "input": "Claim 1:\nfirst"},
+            {"application_number": "1", "input": "Claim 1:\nsecond"},
+            {"application_number": "2", "input": "Claim 1:\nother"},
+        ]
+        self.assertEqual(
+            [row["input"] for row in filings_from_hops(rows)],
+            ["Claim 1:\nfirst", "Claim 1:\nother"],
+        )
+
+    def test_exact_is_the_place_where_the_walk_stops(self) -> None:
+        accessor = IPCAccessor()
+        accessor.init()
+        record = {
+            "application_number": "2020000001",
+            "input": "Claim 1:\nA spade.\n\nCurrent node: <ROOT>\n",
+            "meta": {
+                "primary_ipc": "A",
+                "path_node_ids": ["<ROOT>", "A"],
+            },
+        }
+
+        class Scripted:
+            def __init__(self) -> None:
+                self.i = 0
+
+            def chat(self, messages, *, temperature=None, max_tokens=None):
+                text = ["Classification: A\n", "Classification: <STOP>\n"][self.i]
+                self.i += 1
+                return text
+
+        result = score_walks(
+            [record, {**record, "meta": {**record["meta"], "hop_index": 1}}],
+            accessor=accessor,
+            client=Scripted(),
+            cfg=replace(load_config(), justify=True, back_token="<BACK>"),
+        )
+        self.assertEqual(result.n_filings, 1)
+        self.assertEqual(result.n_exact, 1)
+        self.assertEqual(result.filings[0].predicted, "A")
+        self.assertEqual(result.filings[0].path, ["A"])
+        self.assertEqual(result.filings[0].stop_reason, "stop")
 
 
 def _hop(gold: str, *, justify: bool = False) -> dict:
